@@ -62,6 +62,11 @@ func TestClient(t *testing.T) {
 
 		req, res := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
 		err := client.Send(context.Background(), req, res)
-		require.NoError(t, err)
+		assert.NoError(t, err)
+
+		t.Run("Send returns an error when call Send again", func(t *testing.T) {
+			err = client.Send(context.Background(), req, res)
+			assert.Error(t, err)
+		})
 	})
 }
