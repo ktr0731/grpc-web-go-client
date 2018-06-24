@@ -2,68 +2,62 @@ package grpcweb
 
 import (
 	"context"
-	"errors"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/protoc-gen-gogo/descriptor"
+	"github.com/pkg/errors"
 )
 
 type ClientOption func(*Client)
 
 type Client struct {
-	m         *descriptor.MethodDescriptorProto
-	transport Transport
+	host string
 
-	sent bool
+	tb TransportBuilder
 }
 
-func NewClient(method *descriptor.MethodDescriptorProto, opts ...ClientOption) *Client {
+func NewClient(host string, service *descriptor.ServiceDescriptorProto, method *descriptor.MethodDescriptorProto, opts ...ClientOption) *Client {
 	c := &Client{
-		m: method,
+		host: host,
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	if c.transport == nil {
-		c.transport = DefaultTransportBuilder(c)
+	if c.tb == nil {
+		c.tb = DefaultTransportBuilder
 	}
 
 	return c
 }
 
-func (c *Client) Send(ctx context.Context, req, res proto.Message) error {
-	if c.sent {
-		return errors.New("Send must be called only one time per one API request")
-	}
-
-	defer func() {
-		c.sent = true
-	}()
-
-	if c.m.GetClientStreaming() && c.m.GetServerStreaming() {
+func (c *Client) Send(ctx context.Context, req *Request) error {
+	if req.m.GetClientStreaming() && req.m.GetServerStreaming() {
 		// TODO
 		// return c.bidi()
 	}
-	if c.m.GetClientStreaming() {
+	if req.m.GetClientStreaming() {
 		// TODO
 		// return c.client()
 	}
-	if c.m.GetServerStreaming() {
+	if req.m.GetServerStreaming() {
 		// TODO
 		// return c.server()
 	}
-	return c.unary(ctx, req, res)
+	return c.unary(ctx, req)
 }
 
-func (c *Client) unary(ctx context.Context, req, res proto.Message) error {
-	proto.Marshal(req)
-	return nil
+func (c *Client) unary(ctx context.Context, req *Request) error {
+	b, err := proto.Marshal(req.in)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal request body")
+	}
+	return c.tb(c.host, req).Send(b)
 }
 
 func WithTransportBuilder(b TransportBuilder) ClientOption {
 	return func(c *Client) {
-		c.transport = b(c)
+		c.tb = b
 	}
 }
