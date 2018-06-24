@@ -3,8 +3,7 @@ package grpcweb
 import (
 	"context"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/gogo/protobuf/protoc-gen-gogo/descriptor"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -16,7 +15,7 @@ type Client struct {
 	tb TransportBuilder
 }
 
-func NewClient(host string, service *descriptor.ServiceDescriptorProto, method *descriptor.MethodDescriptorProto, opts ...ClientOption) *Client {
+func NewClient(host string, opts ...ClientOption) *Client {
 	c := &Client{
 		host: host,
 	}

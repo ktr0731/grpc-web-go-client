@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gogo/protobuf/protoc-gen-gogo/descriptor"
+	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,14 +17,29 @@ func p(s string) *string {
 type protoHelper struct {
 	*desc.FileDescriptor
 
-	m map[string]*desc.MessageDescriptor
+	s map[string]*descriptor.ServiceDescriptorProto
+	m map[string]*descriptor.DescriptorProto
 }
 
-func (h *protoHelper) getMessageTypeByName(t *testing.T, n string) *desc.MessageDescriptor {
+func (h *protoHelper) getServiceByName(t *testing.T, n string) *descriptor.ServiceDescriptorProto {
+	if h.s == nil {
+		h.s = map[string]*descriptor.ServiceDescriptorProto{}
+		for _, svc := range h.GetServices() {
+			h.s[svc.GetName()] = svc.AsServiceDescriptorProto()
+		}
+	}
+	svc, ok := h.s[n]
+	if !ok {
+		require.FailNowf(t, "ServiceDescriptor not found", "no such *desc.ServiceDescriptor: %s", n)
+	}
+	return svc
+}
+
+func (h *protoHelper) getMessageTypeByName(t *testing.T, n string) *descriptor.DescriptorProto {
 	if h.m == nil {
-		h.m = map[string]*desc.MessageDescriptor{}
+		h.m = map[string]*descriptor.DescriptorProto{}
 		for _, msg := range h.GetMessageTypes() {
-			h.m[msg.GetName()] = msg
+			h.m[msg.GetName()] = msg.AsDescriptorProto()
 		}
 	}
 	msg, ok := h.m[n]
@@ -43,30 +58,40 @@ func getAPIProto(t *testing.T) *protoHelper {
 	return &protoHelper{FileDescriptor: pkgs[0]}
 }
 
-func TestClient(t *testing.T) {
-	method := &descriptor.MethodDescriptorProto{
-		Name:       p("ExampleMethod"),
-		InputType:  p("AnInputType"),
-		OutputType: p("AnOutputType"),
+type stubTransport struct {
+	host string
+	req  *Request
+
+	body []byte
+}
+
+func (t *stubTransport) Send(body []byte) error {
+	return nil
+}
+
+func stubTransportBuilder(host string, req *Request) Transport {
+	return &stubTransport{
+		host: host,
+		req:  req,
 	}
+}
+
+func TestClient(t *testing.T) {
+	pkg := getAPIProto(t)
+
+	service := pkg.getServiceByName(t, "Example")
 
 	t.Run("NewClient returns new API client", func(t *testing.T) {
-		client := NewClient(method)
+		client := NewClient("http://localhost:50051", WithTransportBuilder(stubTransportBuilder))
 		assert.NotNil(t, client)
 	})
 
 	t.Run("Send an unary API", func(t *testing.T) {
-		client := NewClient(method)
+		client := NewClient("http://localhost:50051", WithTransportBuilder(stubTransportBuilder))
 
-		pkg := getAPIProto(t)
-
-		req, res := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-		err := client.Send(context.Background(), req, res)
+		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+		req := NewRequest(service, service.GetMethod()[0], in, out)
+		err := client.Send(context.Background(), req)
 		assert.NoError(t, err)
-
-		t.Run("Send returns an error when call Send again", func(t *testing.T) {
-			err = client.Send(context.Background(), req, res)
-			assert.Error(t, err)
-		})
 	})
 }
