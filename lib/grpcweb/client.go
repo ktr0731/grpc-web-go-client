@@ -2,6 +2,7 @@ package grpcweb
 
 import (
 	"context"
+	"errors"
 
 	"github.com/gogo/protobuf/protoc-gen-gogo/descriptor"
 )
@@ -11,6 +12,8 @@ type ClientOption func(*Client)
 type Client struct {
 	m         *descriptor.MethodDescriptorProto
 	transport Transport
+
+	sent bool
 }
 
 func NewClient(method *descriptor.MethodDescriptorProto, opts ...ClientOption) *Client {
@@ -18,10 +21,26 @@ func NewClient(method *descriptor.MethodDescriptorProto, opts ...ClientOption) *
 		m: method,
 	}
 
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	if c.transport == nil {
+		c.transport = DefaultTransportBuilder(c)
+	}
+
 	return c
 }
 
 func (c *Client) Send(ctx context.Context, req, res interface{}) error {
+	if c.sent {
+		return errors.New("Send must be called only one time per one API request")
+	}
+
+	defer func() {
+		c.sent = true
+	}()
+
 	if c.m.GetClientStreaming() && c.m.GetServerStreaming() {
 		// TODO
 		// return c.bidi()
