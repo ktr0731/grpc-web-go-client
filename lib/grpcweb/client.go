@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/protoc-gen-gogo/descriptor"
 )
 
@@ -32,7 +33,7 @@ func NewClient(method *descriptor.MethodDescriptorProto, opts ...ClientOption) *
 	return c
 }
 
-func (c *Client) Send(ctx context.Context, req, res interface{}) error {
+func (c *Client) Send(ctx context.Context, req, res proto.Message) error {
 	if c.sent {
 		return errors.New("Send must be called only one time per one API request")
 	}
@@ -56,7 +57,8 @@ func (c *Client) Send(ctx context.Context, req, res interface{}) error {
 	return c.unary(ctx, req, res)
 }
 
-func (c *Client) unary(ctx context.Context, req, res interface{}) error {
+func (c *Client) unary(ctx context.Context, req, res proto.Message) error {
+	proto.Marshal(req)
 	return nil
 }
 
