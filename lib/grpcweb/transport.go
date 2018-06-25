@@ -2,7 +2,7 @@ package grpcweb
 
 import (
 	"bytes"
-	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/pkg/errors"
@@ -15,7 +15,7 @@ var DefaultTransportBuilder TransportBuilder = HTTPTransportBuilder
 // Transport creates new request.
 // Transport is created only one per one request, MUST not use used transport again.
 type Transport interface {
-	Send(body []byte) error
+	Send(body io.Reader) (io.Reader, error)
 }
 
 type HTTPTransport struct {
@@ -26,24 +26,35 @@ type HTTPTransport struct {
 	client *http.Client
 }
 
-func (t *HTTPTransport) Send(body []byte) error {
+func (t *HTTPTransport) Send(body io.Reader) (io.Reader, error) {
 	if t.sent {
-		return errors.New("Send must be called only one time per one Request")
+		return nil, errors.New("Send must be called only one time per one Request")
 	}
 	defer func() {
 		t.sent = true
 	}()
 
-	req, err := http.NewRequest(http.MethodPost, t.req.URL(t.host), bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, t.req.URL(t.host), body)
 	if err != nil {
-		return errors.Wrap(err, "failed to build the API request")
+		return nil, errors.Wrap(err, "failed to build the API request")
 	}
+
+	req.Header.Add("content-type", "application/grpc-web+proto")
+	req.Header.Add("x-grpc-web", "1")
+
 	res, err := t.client.Do(req)
 	if err != nil {
-		return errors.Wrap(err, "failed to send the API")
+		return nil, errors.Wrap(err, "failed to send the API")
 	}
-	fmt.Println(res)
-	return nil
+	defer res.Body.Close()
+
+	var buf bytes.Buffer
+	_, err = buf.ReadFrom(res.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read the response body")
+	}
+
+	return &buf, nil
 }
 
 func HTTPTransportBuilder(host string, req *Request) Transport {

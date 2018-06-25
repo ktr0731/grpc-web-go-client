@@ -2,10 +2,13 @@ package grpcweb
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
+	"github.com/k0kubun/pp"
+	"github.com/ktr0731/grpc-test/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,8 +68,8 @@ type stubTransport struct {
 	body []byte
 }
 
-func (t *stubTransport) Send(body []byte) error {
-	return nil
+func (t *stubTransport) Send(body io.Reader) (io.Reader, error) {
+	return nil, nil
 }
 
 func stubTransportBuilder(host string, req *Request) Transport {
@@ -90,8 +93,43 @@ func TestClient(t *testing.T) {
 		client := NewClient("http://localhost:50051", WithTransportBuilder(stubTransportBuilder))
 
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-		req := NewRequest(service, service.GetMethod()[0], in, out)
-		err := client.Send(context.Background(), req)
+		req, err := NewRequest(service, service.GetMethod()[0], in, out)
+		assert.NoError(t, err)
+		err = client.Send(context.Background(), req)
 		assert.NoError(t, err)
 	})
+
+	t.Run("real", func(t *testing.T) {
+		client := NewClient("http://localhost:50051")
+
+		// in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+		in := &api.SimpleRequest{Name: "ktr"}
+		out := &api.SimpleResponse{}
+		req, err := NewRequest(service, service.GetMethod()[0], in, out)
+		assert.NoError(t, err)
+		err = client.Send(context.Background(), req)
+		assert.NoError(t, err)
+
+		// b, err := proto.Marshal(out)
+		// require.NoError(t, err)
+		// pp.Println(string(b))
+		pp.Println(out)
+	})
+
+	// t.Run("real", func(t *testing.T) {
+	// 	client := NewClient("http://localhost:50051")
+	//
+	// 	// in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+	// 	in := &api.UnaryMessageRequest{Name: &api.Name{FirstName: "foo", LastName: "bar"}}
+	// 	out := &api.SimpleResponse{}
+	// 	req, err := NewRequest(service, service.GetMethod()[1], in, out)
+	// 	assert.NoError(t, err)
+	// 	err = client.Send(context.Background(), req)
+	// 	assert.NoError(t, err)
+	//
+	// 	// b, err := proto.Marshal(out)
+	// 	// require.NoError(t, err)
+	// 	// pp.Println(string(b))
+	// 	pp.Println(out)
+	// })
 }
