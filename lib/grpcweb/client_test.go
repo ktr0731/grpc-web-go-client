@@ -2,6 +2,7 @@ package grpcweb
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -81,7 +82,6 @@ func stubTransportBuilder(host string, req *Request) Transport {
 
 func TestClient(t *testing.T) {
 	pkg := getAPIProto(t)
-
 	service := pkg.getServiceByName(t, "Example")
 
 	t.Run("NewClient returns new API client", func(t *testing.T) {
@@ -98,22 +98,36 @@ func TestClient(t *testing.T) {
 		err = client.Send(context.Background(), req)
 		assert.NoError(t, err)
 	})
+}
 
-	t.Run("real", func(t *testing.T) {
-		defer server.New().Serve(nil, true).Stop()
+func TestClientE2E(t *testing.T) {
+	defer server.New().Serve(nil, true).Stop()
 
+	pkg := getAPIProto(t)
+	service := pkg.getServiceByName(t, "Example")
+
+	t.Run("Unary", func(t *testing.T) {
 		client := NewClient("http://localhost:50051")
 
 		in := pkg.getMessageTypeByName(t, "SimpleRequest")
-		in.SetFieldByName("name", "ktr")
 
-		out := pkg.getMessageTypeByName(t, "SimpleResponse")
+		cases := []string{
+			"ktr",
+			"tooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo-looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong-teeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeext",
+		}
 
-		req, err := NewRequest(service, service.GetMethod()[0], in, out)
-		assert.NoError(t, err)
-		err = client.Send(context.Background(), req)
-		assert.NoError(t, err)
+		for _, c := range cases {
+			in.SetFieldByName("name", c)
 
-		assert.Equal(t, "hello, ktr", out.GetFieldByName("message"))
+			out := pkg.getMessageTypeByName(t, "SimpleResponse")
+
+			req, err := NewRequest(service, service.GetMethod()[0], in, out)
+			assert.NoError(t, err)
+			err = client.Send(context.Background(), req)
+			assert.NoError(t, err)
+
+			expected := fmt.Sprintf("hello, %s", c)
+			assert.Equal(t, expected, out.GetFieldByName("message"))
+		}
 	})
 }

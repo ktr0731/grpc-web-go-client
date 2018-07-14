@@ -57,7 +57,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to marshal the request body")
 	}
 
-	r, err := c.buildRequestBody(b)
+	r, err := c.parseRequestBody(b)
 	if err != nil {
 		return errors.Wrap(err, "failed to build the request body")
 	}
@@ -76,7 +76,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 }
 
 // header (compressed-flag(1) + message-length(4)) + body
-func (c *Client) buildRequestBody(body []byte) (io.Reader, error) {
+func (c *Client) parseRequestBody(body []byte) (io.Reader, error) {
 	bodyLen := len(body)
 
 	h := make([]byte, 0, 5+bodyLen)
