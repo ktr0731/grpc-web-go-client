@@ -1,9 +1,12 @@
 package grpcweb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"path/filepath"
 	"testing"
 
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
@@ -64,43 +67,61 @@ func getAPIProto(t *testing.T) *protoHelper {
 	return &protoHelper{FileDescriptor: pkgs[0]}
 }
 
+func readFile(t *testing.T, fname string) []byte {
+	b, err := ioutil.ReadFile(filepath.Join("testdata", fname))
+	require.NoError(t, err)
+	return b
+}
+
 type stubTransport struct {
 	host string
 	req  *Request
 
-	body []byte
+	res []byte
 }
 
 func (t *stubTransport) Send(body io.Reader) (io.Reader, error) {
-	return nil, nil
+	return bytes.NewReader(t.res), nil
 }
 
-func stubTransportBuilder(host string, req *Request) Transport {
-	return &stubTransport{
-		host: host,
-		req:  req,
+func newStubTransportBuilder(t *stubTransport) TransportBuilder {
+	return func(host string, req *Request) Transport {
+		t.host = host
+		t.req = req
+		return t
 	}
 }
 
-// func TestClient(t *testing.T) {
-// 	pkg := getAPIProto(t)
-// 	service := pkg.getServiceByName(t, "Example")
-//
-// 	t.Run("NewClient returns new API client", func(t *testing.T) {
-// 		client := NewClient(defaultAddr, WithTransportBuilder(stubTransportBuilder))
-// 		assert.NotNil(t, client)
-// 	})
-//
-// 	t.Run("Send an unary API", func(t *testing.T) {
-// 		client := NewClient(defaultAddr, WithTransportBuilder(stubTransportBuilder))
-//
-// 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-// 		req, err := NewRequest(service, service.GetMethod()[0], in, out)
-// 		assert.NoError(t, err)
-// 		err = client.Send(context.Background(), req)
-// 		assert.NoError(t, err)
-// 	})
-// }
+// for testing
+func withStubTransport(t Transport) ClientOption {
+	return func(c *Client) {
+		c.tb = func(host string, req *Request) Transport {
+			return t
+		}
+	}
+}
+
+func TestClient(t *testing.T) {
+	pkg := getAPIProto(t)
+	service := pkg.getServiceByName(t, "Example")
+
+	t.Run("NewClient returns new API client", func(t *testing.T) {
+		client := NewClient(defaultAddr, withStubTransport(&stubTransport{}))
+		assert.NotNil(t, client)
+	})
+
+	t.Run("Send an unary API", func(t *testing.T) {
+		client := NewClient(defaultAddr, withStubTransport(&stubTransport{
+			res: readFile(t, "unary_ktr.out"),
+		}))
+
+		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+		req, err := NewRequest(service, service.GetMethod()[0], in, out)
+		assert.NoError(t, err)
+		err = client.Send(context.Background(), req)
+		assert.NoError(t, err)
+	})
+}
 
 func TestClientE2E(t *testing.T) {
 	defer server.New().Serve(nil, true).Stop()
