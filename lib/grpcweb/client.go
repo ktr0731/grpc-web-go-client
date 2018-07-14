@@ -78,52 +78,46 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 	return proto.Unmarshal(resBody, req.out)
 }
 
+// copied from rpc_util.go#msgHeader
+const headerLen = 5
+
+func header(body []byte) []byte {
+	h := make([]byte, 5)
+	h[0] = byte(0)
+	binary.BigEndian.PutUint32(h[1:], uint32(len(body)))
+	return h
+}
+
 // header (compressed-flag(1) + message-length(4)) + body
-
-// "req header:" []uint8{
-//   0x00, 0x00, 0x00, 0x00, 0x05,
-// }
+// TODO: compressed message
 func (c *Client) parseRequestBody(body []byte) (io.Reader, error) {
-	bodyLen := int32(len(body))
-
-	buf := bytes.NewBuffer(make([]byte, 0, 5+bodyLen))
-
-	// write compressed flag (1 byte), body length (4 bytes, big endian), body
-
-	buf.WriteByte(0x00)
-
-	length := proto.EncodeVarint(uint64(bodyLen))
-	tmp := bytes.NewBuffer(make([]byte, 4))
-	binary.Write(tmp, binary.BigEndian, length)
-	buf.Write(tmp.Bytes()[tmp.Len()-4:])
-
+	buf := bytes.NewBuffer(make([]byte, 0, headerLen+len(body)))
+	buf.Write(header(body))
 	buf.Write(body)
-
 	return buf, nil
 }
 
+// TODO: compressed message
+// copied from rpc_util#parser.recvMsg
 func (c *Client) parseResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byte, error) {
-	var header [5]byte
-	if _, err := resBody.Read(header[:]); err != nil {
+	var h [5]byte
+	if _, err := resBody.Read(h[:]); err != nil {
 		return nil, err
 	}
-	content := make([]byte, int(header[4]))
+
+	length := binary.BigEndian.Uint32(h[1:])
+	if length == 0 {
+		return nil, nil
+	}
+
+	// TODO: check message size
+
+	content := make([]byte, int(length))
 	if _, err := resBody.Read(content); err != nil {
-		return nil, err
-	}
-
-	for _, f := range fields {
-		h, err := buildFieldHeader(f)
-		if err != nil {
-			return nil, err
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
 		}
-		resHeader := []byte{h}
-
-		// if f is string, then
-		length := proto.EncodeVarint(uint64(len(content[2:])))
-		resHeader = append(resHeader, length[len(length)-1])
-
-		content = append(resHeader, content[2:]...)
+		return nil, err
 	}
 
 	return content, nil
