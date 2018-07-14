@@ -3,11 +3,11 @@ package grpcweb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/desc"
-	"github.com/k0kubun/pp"
 	"github.com/pkg/errors"
 )
 
@@ -38,14 +38,17 @@ func NewClient(host string, opts ...ClientOption) *Client {
 func (c *Client) Send(ctx context.Context, req *Request) error {
 	if req.m.GetClientStreaming() && req.m.GetServerStreaming() {
 		// TODO
+		panic("TODO")
 		// return c.bidi()
 	}
 	if req.m.GetClientStreaming() {
 		// TODO
+		panic("TODO")
 		// return c.client()
 	}
 	if req.m.GetServerStreaming() {
 		// TODO
+		panic("TODO")
 		// return c.server()
 	}
 	return c.unary(ctx, req)
@@ -67,7 +70,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to send the request")
 	}
 
-	resBody, err := c.buildResponseBody(res, req.outDesc.GetFields())
+	resBody, err := c.parseResponseBody(res, req.outDesc.GetFields())
 	if err != nil {
 		return errors.Wrap(err, "failed to build the response body")
 	}
@@ -76,21 +79,30 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 }
 
 // header (compressed-flag(1) + message-length(4)) + body
+
+// "req header:" []uint8{
+//   0x00, 0x00, 0x00, 0x00, 0x05,
+// }
 func (c *Client) parseRequestBody(body []byte) (io.Reader, error) {
-	bodyLen := len(body)
+	bodyLen := int32(len(body))
 
-	h := make([]byte, 0, 5+bodyLen)
-	len, err := toBytes(int32(bodyLen))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to convert body length to []byte")
-	}
+	buf := bytes.NewBuffer(make([]byte, 0, 5+bodyLen))
 
-	h = append([]byte{0x00}, len...)
+	// write compressed flag (1 byte), body length (4 bytes, big endian), body
 
-	return bytes.NewReader(append(h, body...)), nil
+	buf.WriteByte(0x00)
+
+	length := proto.EncodeVarint(uint64(bodyLen))
+	tmp := bytes.NewBuffer(make([]byte, 4))
+	binary.Write(tmp, binary.BigEndian, length)
+	buf.Write(tmp.Bytes()[tmp.Len()-4:])
+
+	buf.Write(body)
+
+	return buf, nil
 }
 
-func (c *Client) buildResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byte, error) {
+func (c *Client) parseResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byte, error) {
 	var header [5]byte
 	if _, err := resBody.Read(header[:]); err != nil {
 		return nil, err
@@ -106,18 +118,13 @@ func (c *Client) buildResponseBody(resBody io.Reader, fields []*desc.FieldDescri
 			return nil, err
 		}
 		resHeader := []byte{h}
-		pp.Println("header:", resHeader)
 
 		// if f is string, then
-		length, err := toBytes(int32(len(content[2:])))
-		if err != nil {
-			return nil, err
-		}
+		length := proto.EncodeVarint(uint64(len(content[2:])))
 		resHeader = append(resHeader, length[len(length)-1])
 
 		content = append(resHeader, content[2:]...)
 	}
-	pp.Println(content)
 
 	return content, nil
 }

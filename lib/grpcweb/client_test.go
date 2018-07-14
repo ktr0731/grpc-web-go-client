@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var defaultAddr = "http://localhost:50052"
+
 func p(s string) *string {
 	return &s
 }
@@ -80,25 +82,25 @@ func stubTransportBuilder(host string, req *Request) Transport {
 	}
 }
 
-func TestClient(t *testing.T) {
-	pkg := getAPIProto(t)
-	service := pkg.getServiceByName(t, "Example")
-
-	t.Run("NewClient returns new API client", func(t *testing.T) {
-		client := NewClient("http://localhost:50052", WithTransportBuilder(stubTransportBuilder))
-		assert.NotNil(t, client)
-	})
-
-	t.Run("Send an unary API", func(t *testing.T) {
-		client := NewClient("http://localhost:50052", WithTransportBuilder(stubTransportBuilder))
-
-		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-		req, err := NewRequest(service, service.GetMethod()[0], in, out)
-		assert.NoError(t, err)
-		err = client.Send(context.Background(), req)
-		assert.NoError(t, err)
-	})
-}
+// func TestClient(t *testing.T) {
+// 	pkg := getAPIProto(t)
+// 	service := pkg.getServiceByName(t, "Example")
+//
+// 	t.Run("NewClient returns new API client", func(t *testing.T) {
+// 		client := NewClient(defaultAddr, WithTransportBuilder(stubTransportBuilder))
+// 		assert.NotNil(t, client)
+// 	})
+//
+// 	t.Run("Send an unary API", func(t *testing.T) {
+// 		client := NewClient(defaultAddr, WithTransportBuilder(stubTransportBuilder))
+//
+// 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+// 		req, err := NewRequest(service, service.GetMethod()[0], in, out)
+// 		assert.NoError(t, err)
+// 		err = client.Send(context.Background(), req)
+// 		assert.NoError(t, err)
+// 	})
+// }
 
 func TestClientE2E(t *testing.T) {
 	defer server.New().Serve(nil, true).Stop()
@@ -113,7 +115,7 @@ func TestClientE2E(t *testing.T) {
 
 		cases := []string{
 			"ktr",
-			"tooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo-looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong-teeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeext",
+			// "tooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo-looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong-teeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeext",
 		}
 
 		for _, c := range cases {
