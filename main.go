@@ -21,5 +21,5 @@ func parseProto(t *testing.T, fname string) []*desc.FileDescriptor {
 }
 
 func main() {
-	grpcweb.NewClient()
+	grpcweb.NewClient("http://localhost:50051")
 }
