@@ -17,6 +17,7 @@ type Request struct {
 	outDesc *desc.MessageDescriptor
 }
 
+// TODO: remove descriptors
 func NewRequest(
 	service *descriptor.ServiceDescriptorProto,
 	method *descriptor.MethodDescriptorProto,

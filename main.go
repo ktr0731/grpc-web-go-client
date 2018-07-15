@@ -1,25 +1,38 @@
 package main
 
 import (
-	"testing"
+	"context"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoparse"
-	"github.com/ktr0731/grpc-web-go-client/lib/grpcweb"
-	"github.com/stretchr/testify/require"
+	"github.com/k0kubun/pp"
+	"github.com/ktr0731/grpc-test/api"
+	"github.com/ktr0731/grpc-web-go-client/grpcweb"
 )
 
-func parseProto(t *testing.T, fname string) []*desc.FileDescriptor {
-	t.Helper()
-
+func parseProto(fname string) []*desc.FileDescriptor {
 	p := &protoparse.Parser{
-		ImportPaths: []string{"testdata"},
+		ImportPaths: []string{"."},
 	}
 	d, err := p.ParseFiles(fname)
-	require.NoError(t, err)
+	if err != nil {
+		panic(err)
+	}
 	return d
 }
 
 func main() {
-	grpcweb.NewClient("http://localhost:50051")
+	desc := parseProto("grpcweb/testdata/api.proto")
+	client := grpcweb.NewClient("http://localhost:50051")
+	svc := desc[0].GetServices()[0].AsServiceDescriptorProto()
+	in, out := &api.SimpleRequest{Name: "ktr0731"}, &api.SimpleResponse{}
+	req, err := grpcweb.NewRequest(svc, svc.Method[0], in, out)
+	if err != nil {
+		panic(err)
+	}
+	if err := client.Send(context.Background(), req); err != nil {
+		panic(err)
+	}
+
+	pp.Println(out.GetMessage())
 }
