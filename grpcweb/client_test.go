@@ -84,18 +84,12 @@ func (t *stubTransport) Send(body io.Reader) (io.Reader, error) {
 	return bytes.NewReader(t.res), nil
 }
 
-func newStubTransportBuilder(t *stubTransport) TransportBuilder {
-	return func(host string, req *Request) Transport {
-		t.host = host
-		t.req = req
-		return t
-	}
-}
-
 // for testing
-func withStubTransport(t Transport) ClientOption {
+func withStubTransport(t *stubTransport) ClientOption {
 	return func(c *Client) {
 		c.tb = func(host string, req *Request) Transport {
+			t.host = host
+			t.req = req
 			return t
 		}
 	}
