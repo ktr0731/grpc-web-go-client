@@ -2,6 +2,7 @@ package grpcweb
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +17,7 @@ var DefaultTransportBuilder TransportBuilder = HTTPTransportBuilder
 // Transport creates new request.
 // Transport is created only one per one request, MUST not use used transport again.
 type Transport interface {
-	Send(body io.Reader) (io.Reader, error)
+	Send(ctx context.Context, body io.Reader) (io.Reader, error)
 }
 
 type HTTPTransport struct {
@@ -25,9 +26,11 @@ type HTTPTransport struct {
 	host   string
 	req    *Request
 	client *http.Client
+
+	insecure bool
 }
 
-func (t *HTTPTransport) Send(body io.Reader) (io.Reader, error) {
+func (t *HTTPTransport) Send(ctx context.Context, body io.Reader) (io.Reader, error) {
 	if t.sent {
 		return nil, errors.New("Send must be called only one time per one Request")
 	}
@@ -35,7 +38,10 @@ func (t *HTTPTransport) Send(body io.Reader) (io.Reader, error) {
 		t.sent = true
 	}()
 
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/%s", t.host, t.req.endpoint), body)
+	// TODO: insecure option
+	protocol := "http"
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s://%s%s", protocol, t.host, t.req.endpoint), body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build the API request")
 	}

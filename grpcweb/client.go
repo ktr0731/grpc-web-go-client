@@ -65,7 +65,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to build the request body")
 	}
 
-	res, err := c.tb(c.host, req).Send(r)
+	res, err := c.tb(c.host, req).Send(ctx, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
@@ -75,7 +75,11 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to build the response body")
 	}
 
-	return proto.Unmarshal(resBody, req.out)
+	if err := proto.Unmarshal(resBody, req.out); err != nil {
+		return errors.Wrap(err, "failed to unmarshal response body")
+	}
+
+	return nil
 }
 
 // copied from rpc_util.go#msgHeader

@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var defaultAddr = "http://localhost:50052"
+var defaultAddr = "localhost:50051"
 
 func p(s string) *string {
 	return &s
@@ -80,7 +80,7 @@ type stubTransport struct {
 	res []byte
 }
 
-func (t *stubTransport) Send(body io.Reader) (io.Reader, error) {
+func (t *stubTransport) Send(_ context.Context, body io.Reader) (io.Reader, error) {
 	return bytes.NewReader(t.res), nil
 }
 
@@ -98,6 +98,12 @@ func withStubTransport(t *stubTransport) ClientOption {
 func TestClient(t *testing.T) {
 	pkg := getAPIProto(t)
 	service := pkg.getServiceByName(t, "Example")
+	endpoint := ToEndpoint("api", service, service.GetMethod()[0])
+
+	t.Run("ToEndpoint", func(t *testing.T) {
+		expected := fmt.Sprintf("/api.%s/%s", service.GetName(), service.GetMethod()[0].GetName())
+		assert.Equal(t, expected, endpoint)
+	})
 
 	t.Run("NewClient returns new API client", func(t *testing.T) {
 		client := NewClient(defaultAddr, withStubTransport(&stubTransport{}))
@@ -110,21 +116,22 @@ func TestClient(t *testing.T) {
 		}))
 
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-		req, err := NewRequest(service, service.GetMethod()[0], in, out)
+		req, err := NewRequest(endpoint, in, out)
 		assert.NoError(t, err)
-		err = client.Send(context.Background(), req)
+		err = client.Unary(context.Background(), req)
 		assert.NoError(t, err)
 	})
 }
 
 func TestClientE2E(t *testing.T) {
-	defer server.New().Serve(nil, true).Stop()
+	defer server.New(false).Serve(nil, true).Stop()
 
 	pkg := getAPIProto(t)
 	service := pkg.getServiceByName(t, "Example")
+	endpoint := ToEndpoint("api", service, service.GetMethod()[0])
 
 	t.Run("Unary", func(t *testing.T) {
-		client := NewClient("http://localhost:50051")
+		client := NewClient(defaultAddr)
 
 		in := pkg.getMessageTypeByName(t, "SimpleRequest")
 
@@ -138,9 +145,9 @@ func TestClientE2E(t *testing.T) {
 
 			out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
-			req, err := NewRequest(service, service.GetMethod()[0], in, out)
+			req, err := NewRequest(endpoint, in, out)
 			assert.NoError(t, err)
-			err = client.Send(context.Background(), req)
+			err = client.Unary(context.Background(), req)
 			assert.NoError(t, err)
 
 			expected := fmt.Sprintf("hello, %s", c)

@@ -23,14 +23,15 @@ func parseProto(fname string) []*desc.FileDescriptor {
 
 func main() {
 	desc := parseProto("grpcweb/testdata/api.proto")
-	client := grpcweb.NewClient("http://localhost:50051")
+	client := grpcweb.NewClient("localhost:50051")
 	svc := desc[0].GetServices()[0].AsServiceDescriptorProto()
 	in, out := &api.SimpleRequest{Name: "ktr0731"}, &api.SimpleResponse{}
-	req, err := grpcweb.NewRequest(svc, svc.Method[0], in, out)
+	endpoint := grpcweb.ToEndpoint("api", svc, svc.Method[0])
+	req, err := grpcweb.NewRequest(endpoint, in, out)
 	if err != nil {
 		panic(err)
 	}
-	if err := client.Send(context.Background(), req); err != nil {
+	if err := client.Unary(context.Background(), req); err != nil {
 		panic(err)
 	}
 
