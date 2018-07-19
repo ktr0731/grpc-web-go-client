@@ -2,6 +2,7 @@ package grpcweb
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -34,7 +35,7 @@ func (t *HTTPTransport) Send(body io.Reader) (io.Reader, error) {
 		t.sent = true
 	}()
 
-	req, err := http.NewRequest(http.MethodPost, t.req.URL(t.host), body)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/%s", t.host, t.req.endpoint), body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build the API request")
 	}

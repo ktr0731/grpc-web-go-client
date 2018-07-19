@@ -10,17 +10,13 @@ import (
 )
 
 type Request struct {
-	s *descriptor.ServiceDescriptorProto
-	m *descriptor.MethodDescriptorProto
-
-	in, out proto.Message
-	outDesc *desc.MessageDescriptor
+	endpoint string
+	in, out  proto.Message
+	outDesc  *desc.MessageDescriptor
 }
 
-// TODO: remove descriptors
 func NewRequest(
-	service *descriptor.ServiceDescriptorProto,
-	method *descriptor.MethodDescriptorProto,
+	endpoint string,
 	in proto.Message,
 	out proto.Message,
 ) (*Request, error) {
@@ -29,15 +25,13 @@ func NewRequest(
 		return nil, errors.Wrap(err, "invalid MessageDescriptor passed")
 	}
 	return &Request{
-		s:       service,
-		m:       method,
-		in:      in,
-		out:     out,
-		outDesc: desc,
+		endpoint: endpoint,
+		in:       in,
+		out:      out,
+		outDesc:  desc,
 	}, nil
 }
 
-func (r *Request) URL(host string) string {
-	// TODO: package name
-	return fmt.Sprintf("%s/api.%s/%s", host, r.s.GetName(), r.m.GetName())
+func ToEndpoint(pkg string, s *descriptor.ServiceDescriptorProto, m *descriptor.MethodDescriptorProto) string {
+	return fmt.Sprintf("/%s.%s/%s", pkg, s.GetName(), m.GetName())
 }

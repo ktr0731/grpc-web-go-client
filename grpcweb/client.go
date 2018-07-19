@@ -35,22 +35,22 @@ func NewClient(host string, opts ...ClientOption) *Client {
 	return c
 }
 
-func (c *Client) Send(ctx context.Context, req *Request) error {
-	if req.m.GetClientStreaming() && req.m.GetServerStreaming() {
-		// TODO
-		panic("TODO")
-		// return c.bidi()
-	}
-	if req.m.GetClientStreaming() {
-		// TODO
-		panic("TODO")
-		// return c.client()
-	}
-	if req.m.GetServerStreaming() {
-		// TODO
-		panic("TODO")
-		// return c.server()
-	}
+func (c *Client) Unary(ctx context.Context, req *Request) error {
+	// if req.m.GetClientStreaming() && req.m.GetServerStreaming() {
+	// 	// TODO
+	// 	panic("TODO")
+	// 	// return c.bidi()
+	// }
+	// if req.m.GetClientStreaming() {
+	// 	// TODO
+	// 	panic("TODO")
+	// 	// return c.client()
+	// }
+	// if req.m.GetServerStreaming() {
+	// 	// TODO
+	// 	panic("TODO")
+	// 	// return c.server()
+	// }
 	return c.unary(ctx, req)
 }
 
