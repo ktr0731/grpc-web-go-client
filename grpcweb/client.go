@@ -167,8 +167,8 @@ func parseResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byt
 	// TODO: check message size
 
 	content := make([]byte, int(length))
-	if _, err := resBody.Read(content); err != nil {
-		if err == io.EOF {
+	if n, err := resBody.Read(content); err != nil {
+		if err == io.EOF && int(n) != int(length) {
 			err = io.ErrUnexpectedEOF
 		}
 		return nil, err

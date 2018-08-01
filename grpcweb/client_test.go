@@ -80,8 +80,8 @@ type stubTransport struct {
 	res []byte
 }
 
-func (t *stubTransport) Send(_ context.Context, body io.Reader) (io.Reader, error) {
-	return bytes.NewReader(t.res), nil
+func (t *stubTransport) Send(_ context.Context, body io.Reader) (io.ReadCloser, error) {
+	return ioutil.NopCloser(bytes.NewReader(t.res)), nil
 }
 
 // for testing
