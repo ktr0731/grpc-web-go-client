@@ -121,6 +121,47 @@ func TestClient(t *testing.T) {
 		err = client.Unary(context.Background(), req)
 		assert.NoError(t, err)
 	})
+
+	t.Run("Send a server streaming API", func(t *testing.T) {
+		client := NewClient(defaultAddr, withStubTransport(&stubTransport{
+			res: readFile(t, "server_ktr.out"),
+		}))
+
+		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+		req, err := NewRequest(endpoint, in, out)
+		assert.NoError(t, err)
+		ss, err := client.ServerStreaming(context.Background(), req)
+		assert.NoError(t, err)
+
+		for {
+			res, err := ss.Recv()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "dummy", res)
+		}
+	})
+
+	// t.Run("Send a client streaming API", func(t *testing.T) {
+	// 	client := NewClient(defaultAddr, withStubTransport(&stubTransport{
+	// 		res: readFile(t, "client_streaming_ktr.out"),
+	// 	}))
+	//
+	// 	// NOTE: in is a dummy input. actual input is above file.
+	// 	in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
+	// 	req, err := NewRequest(endpoint, in, out)
+	// 	require.NoError(t, err)
+	//
+	// 	cs, err = client.ClientStream(context.Background(), req)
+	// 	require.NoError(t, err)
+	//
+	// 	names := []string{"ohana", "nako", "minko"}
+	// 	for _, name := range names {
+	// 		cs.Send()
+	// 	}
+	// 	cs.Close()
+	// })
 }
 
 func TestClientE2E(t *testing.T) {
