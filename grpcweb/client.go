@@ -36,25 +36,6 @@ func NewClient(host string, opts ...ClientOption) *Client {
 }
 
 func (c *Client) Unary(ctx context.Context, req *Request) error {
-	// if req.m.GetClientStreaming() && req.m.GetServerStreaming() {
-	// 	// TODO
-	// 	panic("TODO")
-	// 	// return c.bidi()
-	// }
-	// if req.m.GetClientStreaming() {
-	// 	// TODO
-	// 	panic("TODO")
-	// 	// return c.client()
-	// }
-	// if req.m.GetServerStreaming() {
-	// 	// TODO
-	// 	panic("TODO")
-	// 	// return c.server()
-	// }
-	return c.unary(ctx, req)
-}
-
-func (c *Client) unary(ctx context.Context, req *Request) error {
 	b, err := proto.Marshal(req.in)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal the request body")
