@@ -130,12 +130,19 @@ func TestClient(t *testing.T) {
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
 		req, err := NewRequest(endpoint, in, out)
 		assert.NoError(t, err)
-		ss, err := client.ServerStreaming(context.Background(), req)
+		s, err := client.ServerStreaming(context.Background(), req)
 		assert.NoError(t, err)
 
-		res, err := ss.Recv()
-		require.NoError(t, err)
-		assert.Equal(t, "dummy", res.String())
+		for i := 0; ; i++ {
+			res, err := s.Recv()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+
+			expected := fmt.Sprintf("hello ktr, I greet %d times.", i)
+			assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
+		}
 	})
 
 	// t.Run("Send a client streaming API", func(t *testing.T) {
@@ -160,12 +167,12 @@ func TestClient(t *testing.T) {
 }
 
 func TestClientE2E(t *testing.T) {
-	defer server.New(false).Serve(nil, true).Stop()
-
 	pkg := getAPIProto(t)
 	service := pkg.getServiceByName(t, "Example")
 
 	t.Run("Unary", func(t *testing.T) {
+		defer server.New(false).Serve(nil, true).Stop()
+
 		client := NewClient(defaultAddr)
 		endpoint := ToEndpoint("api", service, service.GetMethod()[0])
 
@@ -192,6 +199,8 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("ServerStreaming", func(t *testing.T) {
+		defer server.New(false).Serve(nil, true).Stop()
+
 		client := NewClient(defaultAddr)
 		endpoint := ToEndpoint("api", service, service.GetMethod()[10])
 		assert.Equal(t, endpoint, "/api.Example/ServerStreaming")
@@ -206,10 +215,15 @@ func TestClientE2E(t *testing.T) {
 		s, err := client.ServerStreaming(context.Background(), req)
 		assert.NoError(t, err)
 
-		res, err := s.Recv()
-		assert.NoError(t, err)
+		for i := 0; ; i++ {
+			res, err := s.Recv()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
 
-		expected := "hello ktr, I greet 0 times"
-		assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
+			expected := fmt.Sprintf("hello ktr, I greet %d times.", i)
+			assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
+		}
 	})
 }

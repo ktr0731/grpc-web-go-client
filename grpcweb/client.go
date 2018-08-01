@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/desc"
@@ -54,6 +55,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
+	defer res.Close()
 
 	resBody, err := parseResponseBody(res, req.outDesc.GetFields())
 	if err != nil {
@@ -71,27 +73,48 @@ type ServerStreamClient struct {
 	ctx context.Context
 	t   Transport
 	req *Request
+
+	reqOnce   sync.Once
+	resStream io.ReadCloser
 }
 
 func (c *ServerStreamClient) Recv() (proto.Message, error) {
-	b, err := proto.Marshal(c.req.in)
+	var err error
+	c.reqOnce.Do(func() {
+		var b []byte
+		b, err = proto.Marshal(c.req.in)
+		if err != nil {
+			return
+		}
+
+		var r io.Reader
+		r, err = parseRequestBody(b)
+		if err != nil {
+			return
+		}
+
+		c.resStream, err = c.t.Send(c.ctx, r)
+		if err != nil {
+			return
+		}
+	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal the request body")
+		return nil, errors.Wrap(err, "failed to request server stream")
 	}
 
-	r, err := parseRequestBody(b)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to build the request body")
+	resBody, err := parseResponseBody(c.resStream, c.req.outDesc.GetFields())
+	if err == io.EOF {
+		return nil, err
 	}
 
-	res, err := c.t.Send(c.ctx, r)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to send server stream request")
-	}
-
-	resBody, err := parseResponseBody(res, c.req.outDesc.GetFields())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build the response body")
+	}
+
+	// check compressed flag.
+	// compressed flag is 0 or 1.
+	if resBody[0]>>3 != 0 && resBody[0]>>3 != 1 {
+		return nil, io.EOF
 	}
 
 	if err := proto.Unmarshal(resBody, c.req.out); err != nil {
