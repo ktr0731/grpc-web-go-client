@@ -133,14 +133,9 @@ func TestClient(t *testing.T) {
 		ss, err := client.ServerStreaming(context.Background(), req)
 		assert.NoError(t, err)
 
-		for {
-			res, err := ss.Recv()
-			if err == io.EOF {
-				break
-			}
-			require.NoError(t, err)
-			assert.Equal(t, "dummy", res)
-		}
+		res, err := ss.Recv()
+		require.NoError(t, err)
+		assert.Equal(t, "dummy", res.String())
 	})
 
 	// t.Run("Send a client streaming API", func(t *testing.T) {
@@ -169,10 +164,10 @@ func TestClientE2E(t *testing.T) {
 
 	pkg := getAPIProto(t)
 	service := pkg.getServiceByName(t, "Example")
-	endpoint := ToEndpoint("api", service, service.GetMethod()[0])
 
 	t.Run("Unary", func(t *testing.T) {
 		client := NewClient(defaultAddr)
+		endpoint := ToEndpoint("api", service, service.GetMethod()[0])
 
 		in := pkg.getMessageTypeByName(t, "SimpleRequest")
 
@@ -194,5 +189,27 @@ func TestClientE2E(t *testing.T) {
 			expected := fmt.Sprintf("hello, %s", c)
 			assert.Equal(t, expected, out.GetFieldByName("message"))
 		}
+	})
+
+	t.Run("ServerStreaming", func(t *testing.T) {
+		client := NewClient(defaultAddr)
+		endpoint := ToEndpoint("api", service, service.GetMethod()[10])
+		assert.Equal(t, endpoint, "/api.Example/ServerStreaming")
+
+		in := pkg.getMessageTypeByName(t, "SimpleRequest")
+		in.SetFieldByName("name", "ktr")
+		out := pkg.getMessageTypeByName(t, "SimpleResponse")
+
+		req, err := NewRequest(endpoint, in, out)
+		assert.NoError(t, err)
+
+		s, err := client.ServerStreaming(context.Background(), req)
+		assert.NoError(t, err)
+
+		res, err := s.Recv()
+		assert.NoError(t, err)
+
+		expected := "hello ktr, I greet 0 times"
+		assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
 	})
 }
