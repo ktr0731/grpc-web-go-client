@@ -17,7 +17,7 @@ type ClientOption func(*Client)
 type Client struct {
 	host string
 
-	tb TransportBuilder
+	tb *TransportBuilders
 }
 
 func NewClient(host string, opts ...ClientOption) *Client {
@@ -30,7 +30,7 @@ func NewClient(host string, opts ...ClientOption) *Client {
 	}
 
 	if c.tb == nil {
-		c.tb = DefaultTransportBuilder
+		c.tb = DefaultTransportBuilders
 	}
 
 	return c
@@ -51,7 +51,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to build the request body")
 	}
 
-	res, err := c.tb(c.host, req).Send(ctx, r)
+	res, err := c.tb.Normal(c.host, req).Send(ctx, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
@@ -127,7 +127,7 @@ func (c *ServerStreamClient) Recv() (proto.Message, error) {
 func (c *Client) ServerStreaming(ctx context.Context, req *Request) (*ServerStreamClient, error) {
 	return &ServerStreamClient{
 		ctx: ctx,
-		t:   c.tb(c.host, req),
+		t:   c.tb.Normal(c.host, req),
 		req: req,
 	}, nil
 }
@@ -177,7 +177,7 @@ func parseResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byt
 	return content, nil
 }
 
-func WithTransportBuilder(b TransportBuilder) ClientOption {
+func WithTransportBuilders(b *TransportBuilders) ClientOption {
 	return func(c *Client) {
 		c.tb = b
 	}

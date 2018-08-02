@@ -9,9 +9,18 @@ import (
 	"github.com/pkg/errors"
 )
 
+type TransportBuilders struct {
+	Normal, Stream TransportBuilder
+}
+
 type TransportBuilder func(host string, req *Request) Transport
 
 var DefaultTransportBuilder TransportBuilder = HTTPTransportBuilder
+
+var DefaultTransportBuilders = &TransportBuilders{
+	Normal: DefaultTransportBuilder,
+	Stream: DefaultTransportBuilder,
+}
 
 // Transport creates new request.
 // Transport is created only one per one request, MUST not use used transport again.

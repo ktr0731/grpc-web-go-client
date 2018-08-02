@@ -86,12 +86,13 @@ func (t *stubTransport) Send(_ context.Context, body io.Reader) (io.ReadCloser, 
 
 // for testing
 func withStubTransport(t *stubTransport) ClientOption {
+	stubBuilder := func(host string, req *Request) Transport {
+		t.host = host
+		t.req = req
+		return t
+	}
 	return func(c *Client) {
-		c.tb = func(host string, req *Request) Transport {
-			t.host = host
-			t.req = req
-			return t
-		}
+		c.tb = &TransportBuilders{Normal: stubBuilder, Stream: stubBuilder}
 	}
 }
 
