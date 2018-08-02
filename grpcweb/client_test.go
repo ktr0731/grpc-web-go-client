@@ -12,6 +12,7 @@ import (
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
+	"github.com/k0kubun/pp"
 	"github.com/ktr0731/grpc-test/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,15 +85,31 @@ func (t *stubTransport) Send(_ context.Context, body io.Reader) (io.ReadCloser, 
 	return ioutil.NopCloser(bytes.NewReader(t.res)), nil
 }
 
+type stubStreamTransport struct {
+	res []byte
+}
+
+func (b *stubStreamTransport) Send(body io.Reader) error {
+	return nil
+}
+
+func (b *stubStreamTransport) CloseAndReceive() (io.ReadCloser, error) {
+	return ioutil.NopCloser(bytes.NewReader(b.res)), nil
+}
+
 // for testing
-func withStubTransport(t *stubTransport) ClientOption {
+func withStubTransport(t *stubTransport, st *stubStreamTransport) ClientOption {
 	stubBuilder := func(host string, req *Request) Transport {
 		t.host = host
 		t.req = req
 		return t
 	}
+	stubStreamBuilder := func(host string, req *Request) StreamTransport {
+		return st
+	}
 	return func(c *Client) {
-		c.tb = &TransportBuilders{Normal: stubBuilder, Stream: stubBuilder}
+		c.tb = stubBuilder
+		c.stb = stubStreamBuilder
 	}
 }
 
@@ -107,14 +124,14 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("NewClient returns new API client", func(t *testing.T) {
-		client := NewClient(defaultAddr, withStubTransport(&stubTransport{}))
+		client := NewClient(defaultAddr, withStubTransport(&stubTransport{}, nil))
 		assert.NotNil(t, client)
 	})
 
 	t.Run("Send an unary API", func(t *testing.T) {
 		client := NewClient(defaultAddr, withStubTransport(&stubTransport{
 			res: readFile(t, "unary_ktr.out"),
-		}))
+		}, nil))
 
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
 		req, err := NewRequest(endpoint, in, out)
@@ -126,7 +143,7 @@ func TestClient(t *testing.T) {
 	t.Run("Send a server streaming API", func(t *testing.T) {
 		client := NewClient(defaultAddr, withStubTransport(&stubTransport{
 			res: readFile(t, "server_ktr.out"),
-		}))
+		}, nil))
 
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
 		req, err := NewRequest(endpoint, in, out)
@@ -226,5 +243,35 @@ func TestClientE2E(t *testing.T) {
 			expected := fmt.Sprintf("hello ktr, I greet %d times.", i)
 			assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
 		}
+	})
+
+	t.Run("ClientStreaming", func(t *testing.T) {
+		defer server.New(false).Serve(nil, true).Stop()
+
+		client := NewClient(defaultAddr)
+		endpoint := ToEndpoint("api", service, service.GetMethod()[9])
+		assert.Equal(t, endpoint, "/api.Example/ClientStreaming")
+
+		out := pkg.getMessageTypeByName(t, "SimpleResponse")
+
+		s, err := client.ClientStreaming(context.Background())
+		assert.NoError(t, err)
+
+		for i := 0; i < 3; i++ {
+			pp.Println("Send", i)
+			in := pkg.getMessageTypeByName(t, "SimpleRequest")
+			in.SetFieldByName("name", fmt.Sprintf("ktr%d", i))
+			req, err := NewRequest(endpoint, in, out)
+			require.NoError(t, err)
+
+			err = s.Send(req)
+			assert.NoError(t, err)
+		}
+
+		res, err := s.CloseAndReceive()
+		require.NoError(t, err)
+
+		expected := "ktr2, you greet 3 times."
+		assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
 	})
 }

@@ -132,6 +132,20 @@ func (c *Client) ServerStreaming(ctx context.Context, req *Request) (*ServerStre
 	}, nil
 }
 
+type ClientStreamClient struct {
+	ctx context.Context
+	t   StreamTransport
+	req *Request
+}
+
+func (c *ClientStreamClient) Send(req *Request) error {
+	c.t.Send()
+}
+
+func (c *Client) ClientStreaming(ctx context.Context) (*ClientStreamClient, error) {
+	return &ClientStreamClient{}, nil
+}
+
 // copied from rpc_util.go#msgHeader
 const headerLen = 5
 
