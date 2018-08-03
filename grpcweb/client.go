@@ -17,7 +17,8 @@ type ClientOption func(*Client)
 type Client struct {
 	host string
 
-	tb *TransportBuilders
+	tb  TransportBuilder
+	stb StreamTransportBuilder
 }
 
 func NewClient(host string, opts ...ClientOption) *Client {
@@ -30,7 +31,11 @@ func NewClient(host string, opts ...ClientOption) *Client {
 	}
 
 	if c.tb == nil {
-		c.tb = DefaultTransportBuilders
+		c.tb = DefaultTransportBuilder
+	}
+
+	if c.stb == nil {
+		c.stb = DefaultStreamTransportBuilder
 	}
 
 	return c
@@ -51,7 +56,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to build the request body")
 	}
 
-	res, err := c.tb.Normal(c.host, req).Send(ctx, r)
+	res, err := c.tb(c.host, req).Send(ctx, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
@@ -127,23 +132,68 @@ func (c *ServerStreamClient) Recv() (proto.Message, error) {
 func (c *Client) ServerStreaming(ctx context.Context, req *Request) (*ServerStreamClient, error) {
 	return &ServerStreamClient{
 		ctx: ctx,
-		t:   c.tb.Normal(c.host, req),
+		t:   c.tb(c.host, req),
 		req: req,
 	}, nil
 }
 
 type ClientStreamClient struct {
 	ctx context.Context
+
+	reqOnce sync.Once
+
+	// curried StreamTransportBuilder
+	stb func(req *Request) StreamTransport
 	t   StreamTransport
 	req *Request
 }
 
 func (c *ClientStreamClient) Send(req *Request) error {
-	c.t.Send()
+	c.reqOnce.Do(func() {
+		c.t = c.stb(req)
+		c.req = req
+	})
+
+	// TODO: refactoring
+	b, err := proto.Marshal(req.in)
+	if err != nil {
+		return err
+	}
+
+	r, err := parseRequestBody(b)
+	if err != nil {
+		return err
+	}
+
+	return c.t.Send(r)
+}
+
+func (c *ClientStreamClient) CloseAndReceive() (proto.Message, error) {
+	res, err := c.t.CloseAndReceive()
+	if err != nil {
+		return nil, err
+	}
+	defer res.Close()
+
+	resBody, err := parseResponseBody(res, c.req.outDesc.GetFields())
+	if err != nil {
+		return nil, err
+	}
+
+	if err := proto.Unmarshal(resBody, c.req.out); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response body")
+	}
+
+	return c.req.out, nil
 }
 
 func (c *Client) ClientStreaming(ctx context.Context) (*ClientStreamClient, error) {
-	return &ClientStreamClient{}, nil
+	return &ClientStreamClient{
+		ctx: ctx,
+		stb: func(req *Request) StreamTransport {
+			return c.stb(c.host, req)
+		},
+	}, nil
 }
 
 // copied from rpc_util.go#msgHeader
@@ -191,8 +241,14 @@ func parseResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byt
 	return content, nil
 }
 
-func WithTransportBuilders(b *TransportBuilders) ClientOption {
+func WithTransportBuilder(b TransportBuilder) ClientOption {
 	return func(c *Client) {
 		c.tb = b
+	}
+}
+
+func WithStreamTransportBuilder(b StreamTransportBuilder) ClientOption {
+	return func(c *Client) {
+		c.stb = b
 	}
 }

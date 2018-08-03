@@ -7,25 +7,24 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/k0kubun/pp"
 	"github.com/pkg/errors"
 )
 
-type TransportBuilders struct {
-	Normal, Stream TransportBuilder
-}
+type (
+	TransportBuilder       func(host string, req *Request) Transport
+	StreamTransportBuilder func(host string, req *Request) StreamTransport
+)
 
-type TransportBuilder func(host string, req *Request) Transport
-
-var DefaultTransportBuilder TransportBuilder = HTTPTransportBuilder
-
-var DefaultTransportBuilders = &TransportBuilders{
-	Normal: DefaultTransportBuilder,
-	Stream: DefaultTransportBuilder,
-}
+var (
+	DefaultTransportBuilder       TransportBuilder       = HTTPTransportBuilder
+	DefaultStreamTransportBuilder StreamTransportBuilder = WebSocketTransportBuilder
+)
 
 // Transport creates new request.
 // Transport is created only one per one request, MUST not use used transport again.
@@ -85,32 +84,83 @@ type StreamTransport interface {
 
 type WebSocketTransport struct {
 	conn *websocket.Conn
+	once sync.Once
 }
 
 func (t *WebSocketTransport) Send(body io.Reader) error {
+	t.once.Do(func() {
+		h := http.Header{}
+		h.Set("content-type", "application/grpc-web+proto")
+		h.Set("x-grpc-web", "1")
+		var b bytes.Buffer
+		h.Write(&b)
+		t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
+	})
+
 	var b bytes.Buffer
+	b.Write([]byte{0x00})
 	_, err := io.Copy(&b, body)
 	if err != nil {
 		return errors.Wrap(err, "failed to read request body")
 	}
-	return t.conn.WriteMessage(websocket.TextMessage, b.Bytes())
+
+	fmt.Printf("REQ: %x\n", b.Bytes())
+
+	return t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 }
 
 func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
+	defer t.conn.Close()
+
+	t.conn.WriteMessage(websocket.BinaryMessage, []byte{0x01})
+
+	var buf bytes.Buffer
+
+	// skip wire type and message content
+	_, _, err := t.conn.ReadMessage()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read response body")
+	}
+
+	_, _, err = t.conn.ReadMessage()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read response body")
+	}
+
 	_, b, err := t.conn.ReadMessage()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read response body")
 	}
-	return ioutil.NopCloser(bytes.NewBuffer(b)), nil
+	buf.Write(b)
+
+	_, b, err = t.conn.ReadMessage()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read response body")
+	}
+	buf.Write(b)
+
+	err = t.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		return nil, err
+	}
+
+	return ioutil.NopCloser(&buf), nil
 }
 
 func WebSocketTransportBuilder(host string, req *Request) StreamTransport {
-	pp.Println(host)
-	u := url.URL{Scheme: "ws", Host: host}
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	u := url.URL{Scheme: "ws", Host: host, Path: req.endpoint}
+	pp.Println(u.String())
+	h := http.Header{}
+	h.Set("Sec-WebSocket-Protocol", "grpc-websockets")
+	conn, res, err := websocket.DefaultDialer.Dial(u.String(), h)
 	if err != nil {
 		panic(err)
 	}
+	b, err := httputil.DumpResponse(res, false)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(b))
 	return &WebSocketTransport{
 		conn: conn,
 	}
