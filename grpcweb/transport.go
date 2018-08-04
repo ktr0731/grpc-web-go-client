@@ -7,12 +7,10 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/k0kubun/pp"
 	"github.com/pkg/errors"
 )
 
@@ -104,8 +102,6 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 		return errors.Wrap(err, "failed to read request body")
 	}
 
-	fmt.Printf("REQ: %x\n", b.Bytes())
-
 	return t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 }
 
@@ -149,18 +145,12 @@ func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
 
 func WebSocketTransportBuilder(host string, req *Request) StreamTransport {
 	u := url.URL{Scheme: "ws", Host: host, Path: req.endpoint}
-	pp.Println(u.String())
 	h := http.Header{}
 	h.Set("Sec-WebSocket-Protocol", "grpc-websockets")
-	conn, res, err := websocket.DefaultDialer.Dial(u.String(), h)
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), h)
 	if err != nil {
 		panic(err)
 	}
-	b, err := httputil.DumpResponse(res, false)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(b))
 	return &WebSocketTransport{
 		conn: conn,
 	}
