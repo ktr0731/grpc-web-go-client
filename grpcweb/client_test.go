@@ -92,6 +92,10 @@ func (b *stubStreamTransport) Send(body io.Reader) error {
 	return nil
 }
 
+func (b *stubStreamTransport) Receive() (io.Reader, error) {
+	return ioutil.NopCloser(bytes.NewReader(b.res)), nil
+}
+
 func (b *stubStreamTransport) CloseAndReceive() (io.ReadCloser, error) {
 	return ioutil.NopCloser(bytes.NewReader(b.res)), nil
 }
@@ -103,7 +107,7 @@ func withStubTransport(t *stubTransport, st *stubStreamTransport) ClientOption {
 		t.req = req
 		return t
 	}
-	stubStreamBuilder := func(host string, req *Request) StreamTransport {
+	stubStreamBuilder := func(host string, endpoint string) StreamTransport {
 		return st
 	}
 	return func(c *Client) {
@@ -282,7 +286,7 @@ func TestClientE2E(t *testing.T) {
 
 		out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
-		s, err := client.ClientStreaming(context.Background())
+		s, err := client.BidiStreaming(context.Background(), endpoint)
 		assert.NoError(t, err)
 
 		go func() {

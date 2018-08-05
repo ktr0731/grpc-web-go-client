@@ -16,7 +16,7 @@ import (
 
 type (
 	TransportBuilder       func(host string, req *Request) Transport
-	StreamTransportBuilder func(host string, req *Request) StreamTransport
+	StreamTransportBuilder func(host string, endpoint string) StreamTransport
 )
 
 var (
@@ -77,11 +77,19 @@ func HTTPTransportBuilder(host string, req *Request) Transport {
 
 type StreamTransport interface {
 	Send(body io.Reader) error
-	CloseAndReceive() (io.ReadCloser, error)
+	Receive() (io.Reader, error)
+
+	// Finish sends EOF request to the server.
+	Finish() (io.Reader, error)
+
+	// Close closes the connection.
+	Close() (io.Reader, error)
 }
 
 type WebSocketTransport struct {
+	m    sync.Mutex
 	conn *websocket.Conn
+
 	once sync.Once
 }
 
@@ -92,6 +100,9 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 		h.Set("x-grpc-web", "1")
 		var b bytes.Buffer
 		h.Write(&b)
+
+		t.m.Lock()
+		defer t.m.Unlock()
 		t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 	})
 
@@ -102,15 +113,16 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 		return errors.Wrap(err, "failed to read request body")
 	}
 
+	t.m.Lock()
+	defer t.m.Unlock()
 	return t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 }
 
-func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
-	defer t.conn.Close()
-
-	t.conn.WriteMessage(websocket.BinaryMessage, []byte{0x01})
-
+func (t *WebSocketTransport) Receive() (io.Reader, error) {
 	var buf bytes.Buffer
+
+	t.m.Lock()
+	defer t.m.Unlock()
 
 	// skip wire type and message content
 	_, _, err := t.conn.ReadMessage()
@@ -135,16 +147,34 @@ func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
 	}
 	buf.Write(b)
 
+	return &buf, nil
+}
+
+func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
+
+	defer t.conn.Close()
+
+	t.m.Lock()
+	t.conn.WriteMessage(websocket.BinaryMessage, []byte{0x01})
+	t.m.Unlock()
+
+	res, err := t.Receive()
+	if err != nil {
+		return nil, err
+	}
+
+	t.m.Lock()
+	defer t.m.Unlock()
 	err = t.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	if err != nil {
 		return nil, err
 	}
 
-	return ioutil.NopCloser(&buf), nil
+	return ioutil.NopCloser(res), nil
 }
 
-func WebSocketTransportBuilder(host string, req *Request) StreamTransport {
-	u := url.URL{Scheme: "ws", Host: host, Path: req.endpoint}
+func WebSocketTransportBuilder(host string, endpoint string) StreamTransport {
+	u := url.URL{Scheme: "ws", Host: host, Path: endpoint}
 	h := http.Header{}
 	h.Set("Sec-WebSocket-Protocol", "grpc-websockets")
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), h)

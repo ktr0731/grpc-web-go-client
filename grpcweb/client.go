@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"os"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -74,7 +75,11 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 	return nil
 }
 
-type ServerStreamClient struct {
+type ServerStreamClient interface {
+	Receive() (proto.Message, error)
+}
+
+type serverStreamClient struct {
 	ctx context.Context
 	t   Transport
 	req *Request
@@ -83,7 +88,7 @@ type ServerStreamClient struct {
 	resStream io.ReadCloser
 }
 
-func (c *ServerStreamClient) Recv() (proto.Message, error) {
+func (c *serverStreamClient) Receive() (proto.Message, error) {
 	var err error
 	c.reqOnce.Do(func() {
 		var b []byte
@@ -129,15 +134,20 @@ func (c *ServerStreamClient) Recv() (proto.Message, error) {
 	return c.req.out, nil
 }
 
-func (c *Client) ServerStreaming(ctx context.Context, req *Request) (*ServerStreamClient, error) {
-	return &ServerStreamClient{
+func (c *Client) ServerStreaming(ctx context.Context, req *Request) (ServerStreamClient, error) {
+	return &serverStreamClient{
 		ctx: ctx,
 		t:   c.tb(c.host, req),
 		req: req,
 	}, nil
 }
 
-type ClientStreamClient struct {
+type ClientStreamClient interface {
+	Send(proto.Message) error
+	ReceiveAndClose() (proto.Message, error)
+}
+
+type clientStreamClient struct {
 	ctx context.Context
 
 	reqOnce sync.Once
@@ -148,7 +158,7 @@ type ClientStreamClient struct {
 	req *Request
 }
 
-func (c *ClientStreamClient) Send(req *Request) error {
+func (c *clientStreamClient) Send(req *Request) error {
 	c.reqOnce.Do(func() {
 		c.t = c.stb(req)
 		c.req = req
@@ -168,7 +178,7 @@ func (c *ClientStreamClient) Send(req *Request) error {
 	return c.t.Send(r)
 }
 
-func (c *ClientStreamClient) CloseAndReceive() (proto.Message, error) {
+func (c *clientStreamClient) CloseAndReceive() (proto.Message, error) {
 	res, err := c.t.CloseAndReceive()
 	if err != nil {
 		return nil, err
@@ -187,12 +197,75 @@ func (c *ClientStreamClient) CloseAndReceive() (proto.Message, error) {
 	return c.req.out, nil
 }
 
-func (c *Client) ClientStreaming(ctx context.Context) (*ClientStreamClient, error) {
-	return &ClientStreamClient{
+func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error) {
+	return &clientStreamClient{
 		ctx: ctx,
 		stb: func(req *Request) StreamTransport {
-			return c.stb(c.host, req)
+			return c.stb(c.host, req.endpoint)
 		},
+	}, nil
+}
+
+type BidiStreamClient interface {
+	Send(proto.Message) error
+	Receive() (proto.Message, error)
+	Close() error
+}
+
+type bidiStreamClient struct {
+	ctx context.Context
+
+	reqOnce sync.Once
+
+	t   StreamTransport
+	req *Request
+}
+
+func (c *bidiStreamClient) Send(req *Request) error {
+	b, err := proto.Marshal(req.in)
+	if err != nil {
+		return err
+	}
+
+	r, err := parseRequestBody(b)
+	if err != nil {
+		return err
+	}
+
+	return c.t.Send(r)
+}
+
+func (c *bidiStreamClient) Recv() (proto.Message, error) {
+	res, err := c.t.Receive()
+	if err != nil {
+		return nil, err
+	}
+
+	resBody, err := parseResponseBody(res, c.req.outDesc.GetFields())
+	if err != nil {
+		return nil, err
+	}
+
+	if err := proto.Unmarshal(resBody, c.req.out); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response body")
+	}
+
+	return nil, nil
+}
+
+func (c *bidiStreamClient) Close() error {
+	res, err := c.t.CloseAndReceive()
+	if err != nil {
+		return err
+	}
+	io.Copy(os.Stdout, res)
+	return nil
+}
+
+func (c *Client) BidiStreaming(ctx context.Context, endpoint string) (BidiStreamClient, error) {
+	return &bidiStreamClient{
+		ctx: ctx,
+		t:   c.stb(c.host, endpoint),
 	}, nil
 }
 
