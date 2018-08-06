@@ -87,7 +87,6 @@ type StreamTransport interface {
 }
 
 type WebSocketTransport struct {
-	m    sync.Mutex
 	conn *websocket.Conn
 
 	once sync.Once
@@ -101,8 +100,6 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 		var b bytes.Buffer
 		h.Write(&b)
 
-		t.m.Lock()
-		defer t.m.Unlock()
 		t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 	})
 
@@ -113,16 +110,11 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 		return errors.Wrap(err, "failed to read request body")
 	}
 
-	t.m.Lock()
-	defer t.m.Unlock()
 	return t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 }
 
 func (t *WebSocketTransport) Receive() (io.ReadCloser, error) {
 	var buf bytes.Buffer
-
-	t.m.Lock()
-	defer t.m.Unlock()
 
 	// skip wire type and message content
 	_, _, err := t.conn.ReadMessage()
@@ -152,17 +144,13 @@ func (t *WebSocketTransport) Receive() (io.ReadCloser, error) {
 func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
 	defer t.conn.Close()
 
-	t.m.Lock()
 	t.conn.WriteMessage(websocket.BinaryMessage, []byte{0x01})
-	t.m.Unlock()
 
 	res, err := t.Receive()
 	if err != nil {
 		return nil, err
 	}
 
-	t.m.Lock()
-	defer t.m.Unlock()
 	err = t.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	if err != nil {
 		return nil, err

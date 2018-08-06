@@ -7,11 +7,14 @@ import (
 	"io"
 	"io/ioutil"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
+	"github.com/k0kubun/pp"
 	"github.com/ktr0731/grpc-test/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -281,39 +284,59 @@ func TestClientE2E(t *testing.T) {
 		assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
 	})
 
-	// t.Run("BidiStreaming", func(t *testing.T) {
-	// 	defer server.New(false).Serve(nil, true).Stop()
-	//
-	// 	client := NewClient(defaultAddr)
-	// 	endpoint := ToEndpoint("api", service, service.GetMethod()[9])
-	// 	assert.Equal(t, endpoint, "/api.Example/ClientStreaming")
-	//
-	// 	out := pkg.getMessageTypeByName(t, "SimpleResponse")
-	//
-	// 	s, err := client.BidiStreaming(context.Background(), endpoint)
-	// 	assert.NoError(t, err)
-	//
-	// 	go func() {
-	// 		res, err := s.Receive()
-	// 		if err == io.EOF {
-	// 			return
-	// 		}
-	// 		require.NoError(t, err)
-	// 		expected := "hello ktr, I greet times."
-	// 		assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
-	// 	}()
-	//
-	// 	for i := 0; i < 3; i++ {
-	// 		in := pkg.getMessageTypeByName(t, "SimpleRequest")
-	// 		in.SetFieldByName("name", fmt.Sprintf("ktr%d", i))
-	// 		req, err := NewRequest(endpoint, in, out)
-	// 		require.NoError(t, err)
-	//
-	// 		err = s.Send(req)
-	// 		assert.NoError(t, err)
-	// 	}
-	//
-	// 	err = s.Close()
-	// 	require.NoError(t, err)
-	// })
+	t.Run("BidiStreaming", func(t *testing.T) {
+		defer server.New(false).Serve(nil, true).Stop()
+
+		client := NewClient(defaultAddr)
+		endpoint := ToEndpoint("api", service, service.GetMethod()[11])
+		assert.Equal(t, endpoint, "/api.Example/BidiStreaming")
+
+		in := pkg.getMessageTypeByName(t, "SimpleRequest")
+		out := pkg.getMessageTypeByName(t, "SimpleResponse")
+
+		req, err := NewRequest(endpoint, in, out)
+		require.NoError(t, err)
+		s, err := client.BidiStreaming(context.Background(), endpoint, req)
+		assert.NoError(t, err)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for {
+				res, err := s.Receive()
+				if err == io.EOF {
+					return
+				}
+				// TODO: use testing.T
+				// ref. https://godoc.org/testing#T
+				if err != nil {
+					panic(err)
+				}
+
+				pp.Println(res.(*dynamic.Message).GetFieldByName("message"))
+				actual := res.(*dynamic.Message).GetFieldByName("message").(string)
+				assert.True(t, strings.HasPrefix(actual, "hello ktr"))
+			}
+		}()
+
+		for i := 0; i < 2; i++ {
+			select {
+			case <-done:
+				return
+			default:
+				in := pkg.getMessageTypeByName(t, "SimpleRequest")
+				in.SetFieldByName("name", fmt.Sprintf("ktr%d", i))
+				req, err := NewRequest(endpoint, in, out)
+				require.NoError(t, err)
+
+				err = s.Send(req)
+				assert.NoError(t, err)
+			}
+		}
+
+		time.Sleep(10 * time.Second)
+
+		err = s.Close()
+		require.NoError(t, err)
+	})
 }

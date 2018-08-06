@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"os"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -215,13 +214,21 @@ type BidiStreamClient interface {
 type bidiStreamClient struct {
 	ctx context.Context
 
-	reqOnce sync.Once
+	t StreamTransport
 
-	t   StreamTransport
 	req *Request
+
+	m      sync.Mutex
+	closed bool
 }
 
 func (c *bidiStreamClient) Send(req *Request) error {
+	c.m.Lock()
+	if c.closed {
+		return io.EOF
+	}
+	c.m.Unlock()
+
 	b, err := proto.Marshal(req.in)
 	if err != nil {
 		return err
@@ -236,6 +243,12 @@ func (c *bidiStreamClient) Send(req *Request) error {
 }
 
 func (c *bidiStreamClient) Receive() (proto.Message, error) {
+	c.m.Lock()
+	if c.closed {
+		return nil, io.EOF
+	}
+	c.m.Unlock()
+
 	res, err := c.t.Receive()
 	if err != nil {
 		return nil, err
@@ -250,22 +263,21 @@ func (c *bidiStreamClient) Receive() (proto.Message, error) {
 		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
-	return nil, nil
+	return c.req.out, nil
 }
 
 func (c *bidiStreamClient) Close() error {
-	res, err := c.t.Finish()
-	if err != nil {
-		return err
-	}
-	io.Copy(os.Stdout, res)
-	return nil
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.closed = true
+	return c.t.Close()
 }
 
-func (c *Client) BidiStreaming(ctx context.Context, endpoint string) (BidiStreamClient, error) {
+func (c *Client) BidiStreaming(ctx context.Context, endpoint string, req *Request) (BidiStreamClient, error) {
 	return &bidiStreamClient{
 		ctx: ctx,
 		t:   c.stb(c.host, endpoint),
+		req: req,
 	}, nil
 }
 
