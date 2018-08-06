@@ -77,13 +77,13 @@ func HTTPTransportBuilder(host string, req *Request) Transport {
 
 type StreamTransport interface {
 	Send(body io.Reader) error
-	Receive() (io.Reader, error)
+	Receive() (io.ReadCloser, error)
 
 	// Finish sends EOF request to the server.
-	Finish() (io.Reader, error)
+	Finish() (io.ReadCloser, error)
 
 	// Close closes the connection.
-	Close() (io.Reader, error)
+	Close() error
 }
 
 type WebSocketTransport struct {
@@ -118,7 +118,7 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 	return t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 }
 
-func (t *WebSocketTransport) Receive() (io.Reader, error) {
+func (t *WebSocketTransport) Receive() (io.ReadCloser, error) {
 	var buf bytes.Buffer
 
 	t.m.Lock()
@@ -147,11 +147,11 @@ func (t *WebSocketTransport) Receive() (io.Reader, error) {
 	}
 	buf.Write(b)
 
-	return &buf, nil
+	// TODO: use NextReader
+	return ioutil.NopCloser(&buf), nil
 }
 
-func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
-
+func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
 	defer t.conn.Close()
 
 	t.m.Lock()
@@ -171,6 +171,10 @@ func (t *WebSocketTransport) CloseAndReceive() (io.ReadCloser, error) {
 	}
 
 	return ioutil.NopCloser(res), nil
+}
+
+func (t *WebSocketTransport) Close() error {
+	return t.conn.Close()
 }
 
 func WebSocketTransportBuilder(host string, endpoint string) StreamTransport {

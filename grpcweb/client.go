@@ -143,8 +143,8 @@ func (c *Client) ServerStreaming(ctx context.Context, req *Request) (ServerStrea
 }
 
 type ClientStreamClient interface {
-	Send(proto.Message) error
-	ReceiveAndClose() (proto.Message, error)
+	Send(*Request) error
+	CloseAndReceive() (proto.Message, error)
 }
 
 type clientStreamClient struct {
@@ -179,7 +179,7 @@ func (c *clientStreamClient) Send(req *Request) error {
 }
 
 func (c *clientStreamClient) CloseAndReceive() (proto.Message, error) {
-	res, err := c.t.CloseAndReceive()
+	res, err := c.t.Finish()
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error
 }
 
 type BidiStreamClient interface {
-	Send(proto.Message) error
+	Send(*Request) error
 	Receive() (proto.Message, error)
 	Close() error
 }
@@ -235,7 +235,7 @@ func (c *bidiStreamClient) Send(req *Request) error {
 	return c.t.Send(r)
 }
 
-func (c *bidiStreamClient) Recv() (proto.Message, error) {
+func (c *bidiStreamClient) Receive() (proto.Message, error) {
 	res, err := c.t.Receive()
 	if err != nil {
 		return nil, err
@@ -254,7 +254,7 @@ func (c *bidiStreamClient) Recv() (proto.Message, error) {
 }
 
 func (c *bidiStreamClient) Close() error {
-	res, err := c.t.CloseAndReceive()
+	res, err := c.t.Finish()
 	if err != nil {
 		return err
 	}
