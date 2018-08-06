@@ -141,14 +141,12 @@ func (t *WebSocketTransport) Receive() (io.ReadCloser, error) {
 	}
 	buf.Write(b)
 
-	_, b, err = t.conn.ReadMessage()
+	_, r, err := t.conn.NextReader()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read response body")
 	}
-	buf.Write(b)
 
-	// TODO: use NextReader
-	return ioutil.NopCloser(&buf), nil
+	return ioutil.NopCloser(io.MultiReader(&buf, r)), nil
 }
 
 func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
