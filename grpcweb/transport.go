@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -22,6 +23,10 @@ type (
 var (
 	DefaultTransportBuilder       TransportBuilder       = HTTPTransportBuilder
 	DefaultStreamTransportBuilder StreamTransportBuilder = WebSocketTransportBuilder
+)
+
+var (
+	ErrConnectionClosed = errors.New("connection closed")
 )
 
 // Transport creates new request.
@@ -90,9 +95,18 @@ type WebSocketTransport struct {
 	conn *websocket.Conn
 
 	once sync.Once
+
+	m      sync.Mutex
+	closed bool
 }
 
 func (t *WebSocketTransport) Send(body io.Reader) error {
+	t.m.Lock()
+	if t.closed {
+		return ErrConnectionClosed
+	}
+	t.m.Unlock()
+
 	t.once.Do(func() {
 		h := http.Header{}
 		h.Set("content-type", "application/grpc-web+proto")
@@ -113,32 +127,55 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 	return t.conn.WriteMessage(websocket.BinaryMessage, b.Bytes())
 }
 
-func (t *WebSocketTransport) Receive() (io.ReadCloser, error) {
+func (t *WebSocketTransport) Receive() (res io.ReadCloser, err error) {
+	t.m.Lock()
+	if t.closed {
+		return nil, ErrConnectionClosed
+	}
+	t.m.Unlock()
+
+	defer func() {
+		if err == nil {
+			return
+		}
+
+		if berr, ok := errors.Cause(err).(*net.OpError); ok && !berr.Temporary() {
+			err = ErrConnectionClosed
+		}
+	}()
+
 	var buf bytes.Buffer
 
 	// skip wire type and message content
-	_, _, err := t.conn.ReadMessage()
+	_, _, err = t.conn.ReadMessage()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
+		err = errors.Wrap(err, "failed to read response header")
+		return
 	}
 
 	_, _, err = t.conn.ReadMessage()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
+		err = errors.Wrap(err, "failed to read response header")
+		return
 	}
 
-	_, b, err := t.conn.ReadMessage()
+	var b []byte
+	_, b, err = t.conn.ReadMessage()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
+		err = errors.Wrap(err, "failed to read response body")
+		return
 	}
 	buf.Write(b)
 
-	_, r, err := t.conn.NextReader()
+	var r io.Reader
+	_, r, err = t.conn.NextReader()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
+		return
 	}
 
-	return ioutil.NopCloser(io.MultiReader(&buf, r)), nil
+	res = ioutil.NopCloser(io.MultiReader(&buf, r))
+
+	return
 }
 
 func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
@@ -160,6 +197,9 @@ func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
 }
 
 func (t *WebSocketTransport) Close() error {
+	t.m.Lock()
+	defer t.m.Unlock()
+	t.closed = true
 	return t.conn.Close()
 }
 

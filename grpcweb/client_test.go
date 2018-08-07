@@ -14,7 +14,6 @@ import (
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
-	"github.com/k0kubun/pp"
 	"github.com/ktr0731/grpc-test/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -304,7 +303,7 @@ func TestClientE2E(t *testing.T) {
 			defer close(done)
 			for {
 				res, err := s.Receive()
-				if err == io.EOF {
+				if err == ErrConnectionClosed {
 					return
 				}
 				// TODO: use testing.T
@@ -313,7 +312,6 @@ func TestClientE2E(t *testing.T) {
 					panic(err)
 				}
 
-				pp.Println(res.(*dynamic.Message).GetFieldByName("message"))
 				actual := res.(*dynamic.Message).GetFieldByName("message").(string)
 				assert.True(t, strings.HasPrefix(actual, "hello ktr"))
 			}

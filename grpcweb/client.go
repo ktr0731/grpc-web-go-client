@@ -217,18 +217,9 @@ type bidiStreamClient struct {
 	t StreamTransport
 
 	req *Request
-
-	m      sync.Mutex
-	closed bool
 }
 
 func (c *bidiStreamClient) Send(req *Request) error {
-	c.m.Lock()
-	if c.closed {
-		return io.EOF
-	}
-	c.m.Unlock()
-
 	b, err := proto.Marshal(req.in)
 	if err != nil {
 		return err
@@ -243,12 +234,6 @@ func (c *bidiStreamClient) Send(req *Request) error {
 }
 
 func (c *bidiStreamClient) Receive() (proto.Message, error) {
-	c.m.Lock()
-	if c.closed {
-		return nil, io.EOF
-	}
-	c.m.Unlock()
-
 	res, err := c.t.Receive()
 	if err != nil {
 		return nil, err
@@ -267,9 +252,6 @@ func (c *bidiStreamClient) Receive() (proto.Message, error) {
 }
 
 func (c *bidiStreamClient) Close() error {
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.closed = true
 	return c.t.Close()
 }
 
