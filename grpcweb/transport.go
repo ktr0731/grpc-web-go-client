@@ -94,7 +94,8 @@ type StreamTransport interface {
 type WebSocketTransport struct {
 	conn *websocket.Conn
 
-	once sync.Once
+	once    sync.Once
+	resOnce sync.Once
 
 	m      sync.Mutex
 	closed bool
@@ -144,22 +145,24 @@ func (t *WebSocketTransport) Receive() (res io.ReadCloser, err error) {
 		}
 	}()
 
+	// skip response header
+	t.resOnce.Do(func() {
+		_, _, err = t.conn.ReadMessage()
+		if err != nil {
+			err = errors.Wrap(err, "failed to read response header")
+			return
+		}
+
+		_, _, err = t.conn.ReadMessage()
+		if err != nil {
+			err = errors.Wrap(err, "failed to read response header")
+			return
+		}
+	})
+
 	var buf bytes.Buffer
-
-	// skip wire type and message content
-	_, _, err = t.conn.ReadMessage()
-	if err != nil {
-		err = errors.Wrap(err, "failed to read response header")
-		return
-	}
-
-	_, _, err = t.conn.ReadMessage()
-	if err != nil {
-		err = errors.Wrap(err, "failed to read response header")
-		return
-	}
-
 	var b []byte
+
 	_, b, err = t.conn.ReadMessage()
 	if err != nil {
 		err = errors.Wrap(err, "failed to read response body")

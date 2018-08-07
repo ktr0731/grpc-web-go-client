@@ -14,6 +14,7 @@ import (
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
+	"github.com/k0kubun/pp"
 	"github.com/ktr0731/grpc-test/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,8 +146,9 @@ func TestClient(t *testing.T) {
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
 		req, err := NewRequest(endpoint, in, out)
 		assert.NoError(t, err)
-		err = client.Unary(context.Background(), req)
+		res, err := client.Unary(context.Background(), req)
 		assert.NoError(t, err)
+		assert.Equal(t, "hello, ktr", res.(*dynamic.Message).GetFieldByName("message"))
 	})
 
 	t.Run("Send a server streaming API", func(t *testing.T) {
@@ -212,16 +214,15 @@ func TestClientE2E(t *testing.T) {
 
 		for _, c := range cases {
 			in.SetFieldByName("name", c)
-
 			out := pkg.getMessageTypeByName(t, "SimpleResponse")
-
 			req, err := NewRequest(endpoint, in, out)
+
 			assert.NoError(t, err)
-			err = client.Unary(context.Background(), req)
+			res, err := client.Unary(context.Background(), req)
 			assert.NoError(t, err)
 
 			expected := fmt.Sprintf("hello, %s", c)
-			assert.Equal(t, expected, out.GetFieldByName("message"))
+			assert.Equal(t, expected, res.GetFieldByName("message"))
 		}
 	})
 
@@ -312,6 +313,7 @@ func TestClientE2E(t *testing.T) {
 					panic(err)
 				}
 
+				pp.Println(res.(*dynamic.Message).GetFieldByName("message"))
 				actual := res.(*dynamic.Message).GetFieldByName("message").(string)
 				assert.True(t, strings.HasPrefix(actual, "hello ktr"))
 			}
