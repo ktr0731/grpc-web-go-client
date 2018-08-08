@@ -11,7 +11,7 @@ import (
 
 type Request struct {
 	endpoint string
-	in, out  proto.Message
+	in, out  interface{}
 	outDesc  *desc.MessageDescriptor
 }
 

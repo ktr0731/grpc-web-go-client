@@ -14,7 +14,6 @@ import (
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
-	"github.com/k0kubun/pp"
 	"github.com/ktr0731/grpc-test/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,9 +145,8 @@ func TestClient(t *testing.T) {
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
 		req, err := NewRequest(endpoint, in, out)
 		assert.NoError(t, err)
-		res, err := client.Unary(context.Background(), req)
+		err = client.Unary(context.Background(), req)
 		assert.NoError(t, err)
-		assert.Equal(t, "hello, ktr", res.(*dynamic.Message).GetFieldByName("message"))
 	})
 
 	t.Run("Send a server streaming API", func(t *testing.T) {
@@ -170,7 +168,7 @@ func TestClient(t *testing.T) {
 			require.NoError(t, err)
 
 			expected := fmt.Sprintf("hello ktr, I greet %d times.", i)
-			assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
+			assert.Equal(t, expected, extractMessage(t, res))
 		}
 	})
 
@@ -214,15 +212,16 @@ func TestClientE2E(t *testing.T) {
 
 		for _, c := range cases {
 			in.SetFieldByName("name", c)
-			out := pkg.getMessageTypeByName(t, "SimpleResponse")
-			req, err := NewRequest(endpoint, in, out)
 
+			out := pkg.getMessageTypeByName(t, "SimpleResponse")
+
+			req, err := NewRequest(endpoint, in, out)
 			assert.NoError(t, err)
-			res, err := client.Unary(context.Background(), req)
+			err = client.Unary(context.Background(), req)
 			assert.NoError(t, err)
 
 			expected := fmt.Sprintf("hello, %s", c)
-			assert.Equal(t, expected, res.GetFieldByName("message"))
+			assert.Equal(t, expected, out.GetFieldByName("message"))
 		}
 	})
 
@@ -251,7 +250,7 @@ func TestClientE2E(t *testing.T) {
 			require.NoError(t, err)
 
 			expected := fmt.Sprintf("hello ktr, I greet %d times.", i)
-			assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
+			assert.Equal(t, expected, extractMessage(t, res))
 		}
 	})
 
@@ -281,7 +280,7 @@ func TestClientE2E(t *testing.T) {
 		require.NoError(t, err)
 
 		expected := "ktr2, you greet 3 times."
-		assert.Equal(t, expected, res.(*dynamic.Message).GetFieldByName("message"))
+		assert.Equal(t, expected, extractMessage(t, res))
 	})
 
 	t.Run("BidiStreaming", func(t *testing.T) {
@@ -313,8 +312,7 @@ func TestClientE2E(t *testing.T) {
 					panic(err)
 				}
 
-				pp.Println(res.(*dynamic.Message).GetFieldByName("message"))
-				actual := res.(*dynamic.Message).GetFieldByName("message").(string)
+				actual := extractMessage(t, res)
 				assert.True(t, strings.HasPrefix(actual, "hello ktr"))
 			}
 		}()
@@ -339,4 +337,17 @@ func TestClientE2E(t *testing.T) {
 		err = s.Close()
 		require.NoError(t, err)
 	})
+}
+
+func extractMessage(t *testing.T, res *Response) string {
+	require.NotNil(t, res.Content)
+
+	m, ok := res.Content.(*dynamic.Message)
+	require.True(t, ok)
+
+	msg := m.GetFieldByName("message")
+	s, ok := msg.(string)
+	require.True(t, ok)
+
+	return s
 }

@@ -7,9 +7,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/encoding"
+	pb "google.golang.org/grpc/encoding/proto"
 )
 
 type ClientOption func(*Client)
@@ -17,8 +18,9 @@ type ClientOption func(*Client)
 type Client struct {
 	host string
 
-	tb  TransportBuilder
-	stb StreamTransportBuilder
+	tb    TransportBuilder
+	stb   StreamTransportBuilder
+	codec encoding.Codec
 }
 
 func NewClient(host string, opts ...ClientOption) *Client {
@@ -38,6 +40,11 @@ func NewClient(host string, opts ...ClientOption) *Client {
 		c.stb = DefaultStreamTransportBuilder
 	}
 
+	if c.codec == nil {
+		// use Protocol Buffers as a default codec.
+		c.codec = encoding.GetCodec(pb.Name)
+	}
+
 	return c
 }
 
@@ -46,7 +53,7 @@ func (c *Client) Unary(ctx context.Context, req *Request) error {
 }
 
 func (c *Client) unary(ctx context.Context, req *Request) error {
-	b, err := proto.Marshal(req.in)
+	b, err := c.codec.Marshal(req.in)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal the request body")
 	}
@@ -67,7 +74,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 		return errors.Wrap(err, "failed to build the response body")
 	}
 
-	if err := proto.Unmarshal(resBody, req.out); err != nil {
+	if err := c.codec.Unmarshal(resBody, req.out); err != nil {
 		return errors.Wrap(err, "failed to unmarshal response body")
 	}
 
@@ -75,7 +82,7 @@ func (c *Client) unary(ctx context.Context, req *Request) error {
 }
 
 type ServerStreamClient interface {
-	Receive() (proto.Message, error)
+	Receive() (*Response, error)
 }
 
 type serverStreamClient struct {
@@ -85,13 +92,15 @@ type serverStreamClient struct {
 
 	reqOnce   sync.Once
 	resStream io.ReadCloser
+
+	codec encoding.Codec
 }
 
-func (c *serverStreamClient) Receive() (proto.Message, error) {
+func (c *serverStreamClient) Receive() (*Response, error) {
 	var err error
 	c.reqOnce.Do(func() {
 		var b []byte
-		b, err = proto.Marshal(c.req.in)
+		b, err = c.codec.Marshal(c.req.in)
 		if err != nil {
 			return
 		}
@@ -126,24 +135,28 @@ func (c *serverStreamClient) Receive() (proto.Message, error) {
 		return nil, io.EOF
 	}
 
-	if err := proto.Unmarshal(resBody, c.req.out); err != nil {
+	if err := c.codec.Unmarshal(resBody, c.req.out); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
-	return c.req.out, nil
+	return &Response{
+		ContentType: pb.Name,
+		Content:     c.req.out,
+	}, nil
 }
 
 func (c *Client) ServerStreaming(ctx context.Context, req *Request) (ServerStreamClient, error) {
 	return &serverStreamClient{
-		ctx: ctx,
-		t:   c.tb(c.host, req),
-		req: req,
+		ctx:   ctx,
+		t:     c.tb(c.host, req),
+		req:   req,
+		codec: c.codec,
 	}, nil
 }
 
 type ClientStreamClient interface {
 	Send(*Request) error
-	CloseAndReceive() (proto.Message, error)
+	CloseAndReceive() (*Response, error)
 }
 
 type clientStreamClient struct {
@@ -155,6 +168,8 @@ type clientStreamClient struct {
 	stb func(req *Request) StreamTransport
 	t   StreamTransport
 	req *Request
+
+	codec encoding.Codec
 }
 
 func (c *clientStreamClient) Send(req *Request) error {
@@ -164,7 +179,7 @@ func (c *clientStreamClient) Send(req *Request) error {
 	})
 
 	// TODO: refactoring
-	b, err := proto.Marshal(req.in)
+	b, err := c.codec.Marshal(req.in)
 	if err != nil {
 		return err
 	}
@@ -177,7 +192,7 @@ func (c *clientStreamClient) Send(req *Request) error {
 	return c.t.Send(r)
 }
 
-func (c *clientStreamClient) CloseAndReceive() (proto.Message, error) {
+func (c *clientStreamClient) CloseAndReceive() (*Response, error) {
 	res, err := c.t.Finish()
 	if err != nil {
 		return nil, err
@@ -189,11 +204,14 @@ func (c *clientStreamClient) CloseAndReceive() (proto.Message, error) {
 		return nil, err
 	}
 
-	if err := proto.Unmarshal(resBody, c.req.out); err != nil {
+	if err := c.codec.Unmarshal(resBody, c.req.out); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
-	return c.req.out, nil
+	return &Response{
+		ContentType: pb.Name,
+		Content:     c.req.out,
+	}, nil
 }
 
 func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error) {
@@ -202,12 +220,13 @@ func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error
 		stb: func(req *Request) StreamTransport {
 			return c.stb(c.host, req.endpoint)
 		},
+		codec: c.codec,
 	}, nil
 }
 
 type BidiStreamClient interface {
 	Send(*Request) error
-	Receive() (proto.Message, error)
+	Receive() (*Response, error)
 	Close() error
 }
 
@@ -217,10 +236,12 @@ type bidiStreamClient struct {
 	t StreamTransport
 
 	req *Request
+
+	codec encoding.Codec
 }
 
 func (c *bidiStreamClient) Send(req *Request) error {
-	b, err := proto.Marshal(req.in)
+	b, err := c.codec.Marshal(req.in)
 	if err != nil {
 		return err
 	}
@@ -233,7 +254,7 @@ func (c *bidiStreamClient) Send(req *Request) error {
 	return c.t.Send(r)
 }
 
-func (c *bidiStreamClient) Receive() (proto.Message, error) {
+func (c *bidiStreamClient) Receive() (*Response, error) {
 	res, err := c.t.Receive()
 	if err != nil {
 		return nil, err
@@ -244,11 +265,14 @@ func (c *bidiStreamClient) Receive() (proto.Message, error) {
 		return nil, err
 	}
 
-	if err := proto.Unmarshal(resBody, c.req.out); err != nil {
+	if err := c.codec.Unmarshal(resBody, c.req.out); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
-	return c.req.out, nil
+	return &Response{
+		ContentType: pb.Name,
+		Content:     c.req.out,
+	}, nil
 }
 
 func (c *bidiStreamClient) Close() error {
@@ -257,9 +281,10 @@ func (c *bidiStreamClient) Close() error {
 
 func (c *Client) BidiStreaming(ctx context.Context, endpoint string, req *Request) (BidiStreamClient, error) {
 	return &bidiStreamClient{
-		ctx: ctx,
-		t:   c.stb(c.host, endpoint),
-		req: req,
+		ctx:   ctx,
+		t:     c.stb(c.host, endpoint),
+		req:   req,
+		codec: c.codec,
 	}, nil
 }
 
@@ -317,5 +342,11 @@ func WithTransportBuilder(b TransportBuilder) ClientOption {
 func WithStreamTransportBuilder(b StreamTransportBuilder) ClientOption {
 	return func(c *Client) {
 		c.stb = b
+	}
+}
+
+func WithCodec(codec encoding.Codec) ClientOption {
+	return func(c *Client) {
+		c.codec = codec
 	}
 }
