@@ -290,8 +290,7 @@ func TestClientE2E(t *testing.T) {
 		out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
 		req := NewRequest(endpoint, in, out)
-		s, err := client.BidiStreaming(context.Background(), endpoint, req)
-		assert.NoError(t, err)
+		s := client.BidiStreaming(context.Background(), endpoint, req)
 
 		done := make(chan struct{})
 		go func() {
@@ -328,7 +327,7 @@ func TestClientE2E(t *testing.T) {
 
 		time.Sleep(10 * time.Second)
 
-		err = s.Close()
+		err := s.Close()
 		require.NoError(t, err)
 	})
 }

@@ -12,15 +12,16 @@ type Request struct {
 	in, out  interface{}
 }
 
+// NewRequest instantiates new API request from passed endpoint and I/O types.
+// endpoint must be formed like:
+//
+//   "/{package name}.{service name}/{method name}"
+//
 func NewRequest(
 	endpoint string,
 	in proto.Message,
 	out proto.Message,
 ) *Request {
-	// desc, err := desc.LoadMessageDescriptorForMessage(out)
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "invalid MessageDescriptor passed")
-	// }
 	return &Request{
 		endpoint: endpoint,
 		in:       in,
@@ -28,6 +29,7 @@ func NewRequest(
 	}
 }
 
+// ToEndpoint generates an endpoint from a service descriptor and a method descriptor.
 func ToEndpoint(pkg string, s *descriptor.ServiceDescriptorProto, m *descriptor.MethodDescriptorProto) string {
 	return fmt.Sprintf("/%s.%s/%s", pkg, s.GetName(), m.GetName())
 }

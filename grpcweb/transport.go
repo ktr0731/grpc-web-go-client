@@ -80,6 +80,7 @@ func HTTPTransportBuilder(host string, req *Request) Transport {
 	}
 }
 
+// StreamTransport is used to send API requests for ClientStreamClient and BidiStreamClient.
 type StreamTransport interface {
 	Send(body io.Reader) error
 	Receive() (io.ReadCloser, error)
@@ -91,6 +92,12 @@ type StreamTransport interface {
 	Close() error
 }
 
+// WebSocketTransport is a stream transport implementation.
+//
+// Currently, gRPC Web specification does not support client streaming. (https://github.com/improbable-eng/grpc-web#client-side-streaming)
+// WebSocketTransport supports improbable-eng/grpc-web's own implementation.
+//
+// spec: https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md
 type WebSocketTransport struct {
 	conn *websocket.Conn
 

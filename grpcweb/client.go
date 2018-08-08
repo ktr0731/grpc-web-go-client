@@ -14,6 +14,25 @@ import (
 
 type ClientOption func(*Client)
 
+func WithTransportBuilder(b TransportBuilder) ClientOption {
+	return func(c *Client) {
+		c.tb = b
+	}
+}
+
+func WithStreamTransportBuilder(b StreamTransportBuilder) ClientOption {
+	return func(c *Client) {
+		c.stb = b
+	}
+}
+
+func WithCodec(codec encoding.Codec) ClientOption {
+	return func(c *Client) {
+		c.codec = codec
+	}
+}
+
+// Client starts each API session.
 type Client struct {
 	host string
 
@@ -22,6 +41,9 @@ type Client struct {
 	codec encoding.Codec
 }
 
+// NewClient instantiates new API client for a gRPC Web API server.
+// Client accepts some options to configure transports, codec, and so on.
+// The default codec is Protocol Buffers.
 func NewClient(host string, opts ...ClientOption) *Client {
 	c := &Client{
 		host: host,
@@ -47,6 +69,7 @@ func NewClient(host string, opts ...ClientOption) *Client {
 	return c
 }
 
+// Unary sends an unary request. (also known as simple request)
 func (c *Client) Unary(ctx context.Context, req *Request) (*Response, error) {
 	b, err := c.codec.Marshal(req.in)
 	if err != nil {
@@ -70,12 +93,11 @@ func (c *Client) Unary(ctx context.Context, req *Request) (*Response, error) {
 	}
 
 	if err := c.codec.Unmarshal(resBody, req.out); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal response body")
+		return nil, errors.Wrapf(err, "failed to unmarshal response body by codec %s", c.codec.Name())
 	}
 
 	return &Response{
-		// TODO:
-		ContentType: pb.Name,
+		ContentType: c.codec.Name(),
 		Content:     req.out,
 	}, nil
 }
@@ -89,36 +111,14 @@ type serverStreamClient struct {
 	t   Transport
 	req *Request
 
-	reqOnce   sync.Once
 	resStream io.ReadCloser
 
 	codec encoding.Codec
 }
 
+// Receive receives multi responses through a stream.
+// Receive returns io.EOF at the end.
 func (c *serverStreamClient) Receive() (*Response, error) {
-	var err error
-	c.reqOnce.Do(func() {
-		var b []byte
-		b, err = c.codec.Marshal(c.req.in)
-		if err != nil {
-			return
-		}
-
-		var r io.Reader
-		r, err = parseRequestBody(b)
-		if err != nil {
-			return
-		}
-
-		c.resStream, err = c.t.Send(c.ctx, r)
-		if err != nil {
-			return
-		}
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to request server stream")
-	}
-
 	resBody, err := parseResponseBody(c.resStream)
 	if err == io.EOF {
 		return nil, err
@@ -139,20 +139,41 @@ func (c *serverStreamClient) Receive() (*Response, error) {
 	}
 
 	return &Response{
-		ContentType: pb.Name,
+		ContentType: c.codec.Name(),
 		Content:     c.req.out,
 	}, nil
 }
 
+// ServerStreamClient sends only one request and receives multi responses through a stream.
 func (c *Client) ServerStreaming(ctx context.Context, req *Request) (ServerStreamClient, error) {
+	t := c.tb(c.host, req)
+
+	b, err := c.codec.Marshal(req.in)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := parseRequestBody(b)
+	if err != nil {
+		return nil, err
+	}
+
+	resStream, err := t.Send(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+
 	return &serverStreamClient{
-		ctx:   ctx,
-		t:     c.tb(c.host, req),
-		req:   req,
-		codec: c.codec,
+		ctx:       ctx,
+		t:         t,
+		req:       req,
+		resStream: resStream,
+		codec:     c.codec,
 	}, nil
 }
 
+// ClientStreamClient sends multi requests and receives only one response.
+// At the end, ClientStreamClient must be call CloseAndReceive method.
 type ClientStreamClient interface {
 	Send(*Request) error
 	CloseAndReceive() (*Response, error)
@@ -208,11 +229,12 @@ func (c *clientStreamClient) CloseAndReceive() (*Response, error) {
 	}
 
 	return &Response{
-		ContentType: pb.Name,
+		ContentType: c.codec.Name(),
 		Content:     c.req.out,
 	}, nil
 }
 
+// ClientStreamClient sends multi requests and receives only one response.
 func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error) {
 	return &clientStreamClient{
 		ctx: ctx,
@@ -223,6 +245,8 @@ func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error
 	}, nil
 }
 
+// BidiStreamClient sends multi requests and receives multi responses.
+// At the end, BidiStreamClient must be call Close method.
 type BidiStreamClient interface {
 	Send(*Request) error
 	Receive() (*Response, error)
@@ -269,7 +293,7 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 	}
 
 	return &Response{
-		ContentType: pb.Name,
+		ContentType: c.codec.Name(),
 		Content:     c.req.out,
 	}, nil
 }
@@ -278,13 +302,14 @@ func (c *bidiStreamClient) Close() error {
 	return c.t.Close()
 }
 
-func (c *Client) BidiStreaming(ctx context.Context, endpoint string, req *Request) (BidiStreamClient, error) {
+// BidiStreamClient instantiates bidirectional streaming client.
+func (c *Client) BidiStreaming(ctx context.Context, endpoint string, req *Request) BidiStreamClient {
 	return &bidiStreamClient{
 		ctx:   ctx,
 		t:     c.stb(c.host, endpoint),
 		req:   req,
 		codec: c.codec,
-	}, nil
+	}
 }
 
 // copied from rpc_util.go#msgHeader
@@ -306,8 +331,8 @@ func parseRequestBody(body []byte) (io.Reader, error) {
 	return buf, nil
 }
 
-// TODO: compressed message
 // copied from rpc_util#parser.recvMsg
+// TODO: compressed message
 func parseResponseBody(resBody io.Reader) ([]byte, error) {
 	var h [5]byte
 	if _, err := resBody.Read(h[:]); err != nil {
@@ -330,22 +355,4 @@ func parseResponseBody(resBody io.Reader) ([]byte, error) {
 	}
 
 	return content, nil
-}
-
-func WithTransportBuilder(b TransportBuilder) ClientOption {
-	return func(c *Client) {
-		c.tb = b
-	}
-}
-
-func WithStreamTransportBuilder(b StreamTransportBuilder) ClientOption {
-	return func(c *Client) {
-		c.stb = b
-	}
-}
-
-func WithCodec(codec encoding.Codec) ClientOption {
-	return func(c *Client) {
-		c.codec = codec
-	}
 }
