@@ -71,12 +71,7 @@ func NewClient(host string, opts ...ClientOption) *Client {
 
 // Unary sends an unary request. (also known as simple request)
 func (c *Client) Unary(ctx context.Context, req *Request) (*Response, error) {
-	b, err := c.codec.Marshal(req.in)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal the request body")
-	}
-
-	r, err := parseRequestBody(b)
+	r, err := parseRequestBody(c.codec, req.in)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build the request body")
 	}
@@ -148,12 +143,7 @@ func (c *serverStreamClient) Receive() (*Response, error) {
 func (c *Client) ServerStreaming(ctx context.Context, req *Request) (ServerStreamClient, error) {
 	t := c.tb(c.host, req)
 
-	b, err := c.codec.Marshal(req.in)
-	if err != nil {
-		return nil, err
-	}
-
-	r, err := parseRequestBody(b)
+	r, err := parseRequestBody(c.codec, req.in)
 	if err != nil {
 		return nil, err
 	}
@@ -198,13 +188,7 @@ func (c *clientStreamClient) Send(req *Request) error {
 		c.req = req
 	})
 
-	// TODO: refactoring
-	b, err := c.codec.Marshal(req.in)
-	if err != nil {
-		return err
-	}
-
-	r, err := parseRequestBody(b)
+	r, err := parseRequestBody(c.codec, req.in)
 	if err != nil {
 		return err
 	}
@@ -264,12 +248,7 @@ type bidiStreamClient struct {
 }
 
 func (c *bidiStreamClient) Send(req *Request) error {
-	b, err := c.codec.Marshal(req.in)
-	if err != nil {
-		return err
-	}
-
-	r, err := parseRequestBody(b)
+	r, err := parseRequestBody(c.codec, req.in)
 	if err != nil {
 		return err
 	}
@@ -324,7 +303,11 @@ func header(body []byte) []byte {
 
 // header (compressed-flag(1) + message-length(4)) + body
 // TODO: compressed message
-func parseRequestBody(body []byte) (io.Reader, error) {
+func parseRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) {
+	body, err := codec.Marshal(in)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal the request body")
+	}
 	buf := bytes.NewBuffer(make([]byte, 0, headerLen+len(body)))
 	buf.Write(header(body))
 	buf.Write(body)
