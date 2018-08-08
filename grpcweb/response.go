@@ -4,6 +4,4 @@ package grpcweb
 type Response struct {
 	ContentType string
 	Content     interface{}
-
-	Request *Request
 }

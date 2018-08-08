@@ -7,7 +7,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/jhump/protoreflect/desc"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/encoding"
 	pb "google.golang.org/grpc/encoding/proto"
@@ -48,37 +47,37 @@ func NewClient(host string, opts ...ClientOption) *Client {
 	return c
 }
 
-func (c *Client) Unary(ctx context.Context, req *Request) error {
-	return c.unary(ctx, req)
-}
-
-func (c *Client) unary(ctx context.Context, req *Request) error {
+func (c *Client) Unary(ctx context.Context, req *Request) (*Response, error) {
 	b, err := c.codec.Marshal(req.in)
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal the request body")
+		return nil, errors.Wrap(err, "failed to marshal the request body")
 	}
 
 	r, err := parseRequestBody(b)
 	if err != nil {
-		return errors.Wrap(err, "failed to build the request body")
+		return nil, errors.Wrap(err, "failed to build the request body")
 	}
 
-	res, err := c.tb(c.host, req).Send(ctx, r)
+	rawBody, err := c.tb(c.host, req).Send(ctx, r)
 	if err != nil {
-		return errors.Wrap(err, "failed to send the request")
+		return nil, errors.Wrap(err, "failed to send the request")
 	}
-	defer res.Close()
+	defer rawBody.Close()
 
-	resBody, err := parseResponseBody(res, req.outDesc.GetFields())
+	resBody, err := parseResponseBody(rawBody)
 	if err != nil {
-		return errors.Wrap(err, "failed to build the response body")
+		return nil, errors.Wrap(err, "failed to build the response body")
 	}
 
 	if err := c.codec.Unmarshal(resBody, req.out); err != nil {
-		return errors.Wrap(err, "failed to unmarshal response body")
+		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
-	return nil
+	return &Response{
+		// TODO:
+		ContentType: pb.Name,
+		Content:     req.out,
+	}, nil
 }
 
 type ServerStreamClient interface {
@@ -120,7 +119,7 @@ func (c *serverStreamClient) Receive() (*Response, error) {
 		return nil, errors.Wrap(err, "failed to request server stream")
 	}
 
-	resBody, err := parseResponseBody(c.resStream, c.req.outDesc.GetFields())
+	resBody, err := parseResponseBody(c.resStream)
 	if err == io.EOF {
 		return nil, err
 	}
@@ -199,7 +198,7 @@ func (c *clientStreamClient) CloseAndReceive() (*Response, error) {
 	}
 	defer res.Close()
 
-	resBody, err := parseResponseBody(res, c.req.outDesc.GetFields())
+	resBody, err := parseResponseBody(res)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +259,7 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 		return nil, err
 	}
 
-	resBody, err := parseResponseBody(res, c.req.outDesc.GetFields())
+	resBody, err := parseResponseBody(res)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +308,7 @@ func parseRequestBody(body []byte) (io.Reader, error) {
 
 // TODO: compressed message
 // copied from rpc_util#parser.recvMsg
-func parseResponseBody(resBody io.Reader, fields []*desc.FieldDescriptor) ([]byte, error) {
+func parseResponseBody(resBody io.Reader) ([]byte, error) {
 	var h [5]byte
 	if _, err := resBody.Read(h[:]); err != nil {
 		return nil, err

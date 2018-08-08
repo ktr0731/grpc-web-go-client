@@ -143,10 +143,10 @@ func TestClient(t *testing.T) {
 		}, nil))
 
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-		req, err := NewRequest(endpoint, in, out)
+		req := NewRequest(endpoint, in, out)
+		res, err := client.Unary(context.Background(), req)
 		assert.NoError(t, err)
-		err = client.Unary(context.Background(), req)
-		assert.NoError(t, err)
+		assert.Equal(t, "hello, ktr", extractMessage(t, res))
 	})
 
 	t.Run("Send a server streaming API", func(t *testing.T) {
@@ -155,8 +155,7 @@ func TestClient(t *testing.T) {
 		}, nil))
 
 		in, out := pkg.getMessageTypeByName(t, "SimpleRequest"), pkg.getMessageTypeByName(t, "SimpleResponse")
-		req, err := NewRequest(endpoint, in, out)
-		assert.NoError(t, err)
+		req := NewRequest(endpoint, in, out)
 		s, err := client.ServerStreaming(context.Background(), req)
 		assert.NoError(t, err)
 
@@ -215,13 +214,12 @@ func TestClientE2E(t *testing.T) {
 
 			out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
-			req, err := NewRequest(endpoint, in, out)
-			assert.NoError(t, err)
-			err = client.Unary(context.Background(), req)
+			req := NewRequest(endpoint, in, out)
+			res, err := client.Unary(context.Background(), req)
 			assert.NoError(t, err)
 
 			expected := fmt.Sprintf("hello, %s", c)
-			assert.Equal(t, expected, out.GetFieldByName("message"))
+			assert.Equal(t, expected, extractMessage(t, res))
 		}
 	})
 
@@ -236,8 +234,7 @@ func TestClientE2E(t *testing.T) {
 		in.SetFieldByName("name", "ktr")
 		out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
-		req, err := NewRequest(endpoint, in, out)
-		assert.NoError(t, err)
+		req := NewRequest(endpoint, in, out)
 
 		s, err := client.ServerStreaming(context.Background(), req)
 		assert.NoError(t, err)
@@ -269,8 +266,7 @@ func TestClientE2E(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			in := pkg.getMessageTypeByName(t, "SimpleRequest")
 			in.SetFieldByName("name", fmt.Sprintf("ktr%d", i))
-			req, err := NewRequest(endpoint, in, out)
-			require.NoError(t, err)
+			req := NewRequest(endpoint, in, out)
 
 			err = s.Send(req)
 			assert.NoError(t, err)
@@ -293,8 +289,7 @@ func TestClientE2E(t *testing.T) {
 		in := pkg.getMessageTypeByName(t, "SimpleRequest")
 		out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
-		req, err := NewRequest(endpoint, in, out)
-		require.NoError(t, err)
+		req := NewRequest(endpoint, in, out)
 		s, err := client.BidiStreaming(context.Background(), endpoint, req)
 		assert.NoError(t, err)
 
@@ -324,10 +319,9 @@ func TestClientE2E(t *testing.T) {
 			default:
 				in := pkg.getMessageTypeByName(t, "SimpleRequest")
 				in.SetFieldByName("name", fmt.Sprintf("ktr%d", i))
-				req, err := NewRequest(endpoint, in, out)
-				require.NoError(t, err)
+				req := NewRequest(endpoint, in, out)
 
-				err = s.Send(req)
+				err := s.Send(req)
 				assert.NoError(t, err)
 			}
 		}
