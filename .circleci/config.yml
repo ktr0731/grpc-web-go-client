@@ -1,7 +1,7 @@
 version: 2
 jobs:
   build:
-    working_directory: /go/src/github.com/ktr0731/grpc-web-go-client/grpcweb
+    working_directory: /go/src/github.com/ktr0731/grpc-web-go-client
     docker:
       - image: circleci/golang:1.10.3
 
@@ -9,9 +9,15 @@ jobs:
       - checkout
 
       - run:
+          name: install dependencies
+          command: |
+            curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+            dep ensure
+
+      - run:
           name: build
-          command: go build
+          command: CGO_ENABLED=0 go build ./grpcweb
 
       - run:
           name: test
-          command: go test -v -race ./...
+          command: CGO_ENALBED=0 go test -v -race ./grpcweb
