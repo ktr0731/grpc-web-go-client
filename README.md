@@ -1,4 +1,5 @@
 # gRPC Web Go client
+[![CircleCI](https://circleci.com/gh/ktr0731/grpc-web-go-client.svg?style=svg)](https://circleci.com/gh/ktr0731/grpc-web-go-client)  
 
 gRPC Web client written in Go
 

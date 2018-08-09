@@ -1,0 +1,17 @@
+version: 2
+jobs:
+  build:
+    working_directory: /go/src/github.com/ktr0731/grpc-web-go-client/grpcweb
+    docker:
+      - image: circleci/golang:1.10.3
+
+    steps:
+      - checkout
+
+      - run:
+          name: build
+          command: go build
+
+      - run:
+          name: test
+          command: go test -v -race ./...
