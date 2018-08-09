@@ -282,10 +282,10 @@ func (c *bidiStreamClient) Close() error {
 }
 
 // BidiStreamClient instantiates bidirectional streaming client.
-func (c *Client) BidiStreaming(ctx context.Context, endpoint string, req *Request) BidiStreamClient {
+func (c *Client) BidiStreaming(ctx context.Context, req *Request) BidiStreamClient {
 	return &bidiStreamClient{
 		ctx:   ctx,
-		t:     c.stb(c.host, endpoint),
+		t:     c.stb(c.host, req.endpoint),
 		req:   req,
 		codec: c.codec,
 	}

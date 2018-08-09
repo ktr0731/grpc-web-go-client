@@ -270,7 +270,7 @@ func TestClientE2E(t *testing.T) {
 		out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
 		req := NewRequest(endpoint, in, out)
-		s := client.BidiStreaming(context.Background(), endpoint, req)
+		s := client.BidiStreaming(context.Background(), req)
 
 		done := make(chan struct{})
 		go func() {
