@@ -32,6 +32,7 @@ func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context, opts 
 type serverReflectionServerReflectionInfoClient struct {
 	cc grpcweb.BidiStreamClient
 
+	// To satisfy pb.ServerReflection_ServerReflectionInfoClient
 	grpc.ClientStream
 }
 
@@ -46,6 +47,10 @@ func (x *serverReflectionServerReflectionInfoClient) Recv() (*pb.ServerReflectio
 		return nil, err
 	}
 	return res.Content.(*pb.ServerReflectionResponse), nil
+}
+
+func (x *serverReflectionServerReflectionInfoClient) CloseSend() error {
+	return x.cc.Close()
 }
 
 func newRequest(in *pb.ServerReflectionRequest) *grpcweb.Request {
