@@ -175,7 +175,7 @@ type clientStreamClient struct {
 	reqOnce sync.Once
 
 	// curried StreamTransportBuilder
-	stb func(req *Request) StreamTransport
+	stb func(req *Request) (StreamTransport, error)
 	t   StreamTransport
 	req *Request
 
@@ -183,10 +183,14 @@ type clientStreamClient struct {
 }
 
 func (c *clientStreamClient) Send(req *Request) error {
+	var err error
 	c.reqOnce.Do(func() {
-		c.t = c.stb(req)
+		c.t, err = c.stb(req)
 		c.req = req
 	})
+	if err != nil {
+		return err
+	}
 
 	r, err := parseRequestBody(c.codec, req.in)
 	if err != nil {
@@ -222,7 +226,7 @@ func (c *clientStreamClient) CloseAndReceive() (*Response, error) {
 func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error) {
 	return &clientStreamClient{
 		ctx: ctx,
-		stb: func(req *Request) StreamTransport {
+		stb: func(req *Request) (StreamTransport, error) {
 			return c.stb(c.host, req.endpoint)
 		},
 		codec: c.codec,
@@ -282,13 +286,17 @@ func (c *bidiStreamClient) Close() error {
 }
 
 // BidiStreamClient instantiates bidirectional streaming client.
-func (c *Client) BidiStreaming(ctx context.Context, req *Request) BidiStreamClient {
+func (c *Client) BidiStreaming(ctx context.Context, req *Request) (BidiStreamClient, error) {
+	t, err := c.stb(c.host, req.endpoint)
+	if err != nil {
+		return nil, err
+	}
 	return &bidiStreamClient{
 		ctx:   ctx,
-		t:     c.stb(c.host, req.endpoint),
+		t:     t,
 		req:   req,
 		codec: c.codec,
-	}
+	}, nil
 }
 
 // copied from rpc_util.go#msgHeader
