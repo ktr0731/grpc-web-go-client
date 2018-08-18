@@ -113,8 +113,8 @@ func withStubTransport(t *stubTransport, st *stubStreamTransport) ClientOption {
 		t.req = req
 		return t
 	}
-	stubStreamBuilder := func(host string, endpoint string) StreamTransport {
-		return st
+	stubStreamBuilder := func(host string, endpoint string) (StreamTransport, error) {
+		return st, nil
 	}
 	return func(c *Client) {
 		c.tb = stubBuilder
@@ -270,7 +270,8 @@ func TestClientE2E(t *testing.T) {
 		out := pkg.getMessageTypeByName(t, "SimpleResponse")
 
 		req := NewRequest(endpoint, in, out)
-		s := client.BidiStreaming(context.Background(), req)
+		s, err := client.BidiStreaming(context.Background(), req)
+		require.NoError(t, err)
 
 		done := make(chan struct{})
 		go func() {
@@ -307,7 +308,7 @@ func TestClientE2E(t *testing.T) {
 
 		time.Sleep(10 * time.Second)
 
-		err := s.Close()
+		err = s.Close()
 		require.NoError(t, err)
 	})
 }

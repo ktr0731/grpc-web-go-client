@@ -17,7 +17,7 @@ import (
 
 type (
 	TransportBuilder       func(host string, req *Request) Transport
-	StreamTransportBuilder func(host string, endpoint string) StreamTransport
+	StreamTransportBuilder func(host string, endpoint string) (StreamTransport, error)
 )
 
 var (
@@ -213,15 +213,15 @@ func (t *WebSocketTransport) Close() error {
 	return t.conn.Close()
 }
 
-func WebSocketTransportBuilder(host string, endpoint string) StreamTransport {
+func WebSocketTransportBuilder(host string, endpoint string) (StreamTransport, error) {
 	u := url.URL{Scheme: "ws", Host: host, Path: endpoint}
 	h := http.Header{}
 	h.Set("Sec-WebSocket-Protocol", "grpc-websockets")
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), h)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return &WebSocketTransport{
 		conn: conn,
-	}
+	}, nil
 }
