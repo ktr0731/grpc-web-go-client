@@ -28,8 +28,10 @@ func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context, opts 
 
 	req := newRequest(nil)
 
-	stream := c.cc.BidiStreaming(ctx, req)
-
+	stream, err := c.cc.BidiStreaming(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	return &serverReflectionServerReflectionInfoClient{cc: stream}, nil
 }
 
