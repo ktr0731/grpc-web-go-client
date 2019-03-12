@@ -9,7 +9,7 @@ import (
 
 type Request struct {
 	endpoint string
-	in, out  interface{}
+	in, out  proto.Message
 }
 
 // NewRequest instantiates new API request from passed endpoint and I/O types.

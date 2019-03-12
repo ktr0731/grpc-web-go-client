@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/encoding"
 	pb "google.golang.org/grpc/encoding/proto"
@@ -129,13 +130,14 @@ func (c *serverStreamClient) Receive() (*Response, error) {
 		return nil, io.EOF
 	}
 
-	if err := c.codec.Unmarshal(resBody, c.req.out); err != nil {
+	contentProto := proto.Clone(c.req.out)
+	if err := c.codec.Unmarshal(resBody, contentProto); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
 	return &Response{
 		ContentType: c.codec.Name(),
-		Content:     c.req.out,
+		Content:     contentProto,
 	}, nil
 }
 
@@ -271,13 +273,14 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 		return nil, err
 	}
 
-	if err := c.codec.Unmarshal(resBody, c.req.out); err != nil {
+	contentProto := proto.Clone(c.req.out)
+	if err := c.codec.Unmarshal(resBody, contentProto); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal response body")
 	}
 
 	return &Response{
 		ContentType: c.codec.Name(),
-		Content:     c.req.out,
+		Content:     contentProto,
 	}, nil
 }
 
@@ -311,7 +314,7 @@ func header(body []byte) []byte {
 
 // header (compressed-flag(1) + message-length(4)) + body
 // TODO: compressed message
-func parseRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) {
+func parseRequestBody(codec encoding.Codec, in proto.Message) (io.Reader, error) {
 	body, err := codec.Marshal(in)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to marshal the request body")
