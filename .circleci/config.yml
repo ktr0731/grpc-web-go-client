@@ -1,18 +1,12 @@
 version: 2
 jobs:
   build:
-    working_directory: /go/src/github.com/ktr0731/grpc-web-go-client
+    working_directory: /go/grpc-web-go-client
     docker:
-      - image: circleci/golang:1.10.3
+      - image: circleci/golang:1.12
 
     steps:
       - checkout
-
-      - run:
-          name: install dependencies
-          command: |
-            curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
-            dep ensure
 
       - run:
           name: build
