@@ -6,6 +6,8 @@ github.com/gorilla/websocket v1.2.0 h1:VJtLvh6VQym50czpZzx07z/kw9EgAxI3x1ZB8taTM
 github.com/gorilla/websocket v1.2.0/go.mod h1:E7qHFY5m1UJ88s3WnNqhKjPHQ0heANvMoAMk2YaljkQ=
 github.com/improbable-eng/grpc-web v0.0.0-20180502145718-72eb701d6f32 h1:CzvryRU6KptU7ht8ldVtg31MIkkA8csTMqSIYGfQCDI=
 github.com/improbable-eng/grpc-web v0.0.0-20180502145718-72eb701d6f32/go.mod h1:6hRR09jOEG81ADP5wCQju1z71g6OL4eEvELdran/3cs=
+github.com/improbable-eng/grpc-web v0.9.1 h1:tenDg9Lg+zYXeS/ojbKyfwVO5TVYh5FFGsrXNAblF1o=
+github.com/improbable-eng/grpc-web v0.9.1/go.mod h1:6hRR09jOEG81ADP5wCQju1z71g6OL4eEvELdran/3cs=
 github.com/jhump/protoreflect v0.0.0-20180803214909-95c5cbbeaee7 h1:G3qFffbQTa7Nwvrsd9xtF31q6nWWBRTczgK5GbOOIsQ=
 github.com/jhump/protoreflect v0.0.0-20180803214909-95c5cbbeaee7/go.mod h1:eki7DI0mJrpRlDikO63gRZIG0keYYxgKDUdI2QmkZCQ=
 github.com/ktr0731/grpc-test v0.0.0-20180809024533-02a4985b2497 h1:qE1XcsEpBgPFlfrAul66fsiy6jQIGDzIlZ4OKqUZku0=
