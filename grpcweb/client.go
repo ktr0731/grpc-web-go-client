@@ -240,7 +240,7 @@ func (c *Client) ClientStreaming(ctx context.Context) (ClientStreamClient, error
 type BidiStreamClient interface {
 	Send(*Request) error
 	Receive() (*Response, error)
-	Close() error
+	CloseSend() error
 }
 
 type bidiStreamClient struct {
@@ -284,7 +284,7 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 	}, nil
 }
 
-func (c *bidiStreamClient) Close() error {
+func (c *bidiStreamClient) CloseSend() error {
 	return c.t.Close()
 }
 

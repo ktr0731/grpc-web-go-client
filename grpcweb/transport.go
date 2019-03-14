@@ -206,11 +206,13 @@ func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
 	return ioutil.NopCloser(res), nil
 }
 
+// TODO: rename to CloseSend. It send a close signal, don't close own connection.
 func (t *WebSocketTransport) Close() error {
 	t.m.Lock()
 	defer t.m.Unlock()
 	t.closed = true
-	return t.conn.Close()
+	// return t.conn.Close()
+	return nil
 }
 
 func WebSocketTransportBuilder(host string, endpoint string) (StreamTransport, error) {
