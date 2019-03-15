@@ -266,7 +266,10 @@ func (c *bidiStreamClient) Send(req *Request) error {
 	return c.t.Send(r)
 }
 
-var grpcStatusBytes = []byte("Grpc-Status: ")
+var (
+	canonicalGRPCStatusBytes = []byte("Grpc-Status: ")
+	gRPCStatusBytes          = []byte("grpc-status: ")
+)
 
 func (c *bidiStreamClient) Receive() (*Response, error) {
 	res, err := c.t.Receive()
@@ -280,7 +283,7 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 	}
 
 	// If trailers appeared, notify it by returning io.EOF.
-	if bytes.HasPrefix(resBody, grpcStatusBytes) {
+	if bytes.HasPrefix(resBody, gRPCStatusBytes) || bytes.HasPrefix(resBody, canonicalGRPCStatusBytes) {
 		c.t.Close()
 		return nil, io.EOF
 	}
