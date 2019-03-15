@@ -57,7 +57,7 @@ func (x *serverReflectionServerReflectionInfoClient) Recv() (*pb.ServerReflectio
 }
 
 func (x *serverReflectionServerReflectionInfoClient) CloseSend() error {
-	return x.cc.Close()
+	return x.cc.CloseSend()
 }
 
 func newRequest(in *pb.ServerReflectionRequest) *grpcweb.Request {

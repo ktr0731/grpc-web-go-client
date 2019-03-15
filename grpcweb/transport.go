@@ -85,8 +85,8 @@ type StreamTransport interface {
 	Send(body io.Reader) error
 	Receive() (io.ReadCloser, error)
 
-	// Finish sends EOF request to the server.
-	Finish() (io.ReadCloser, error)
+	// CloseSend sends a close signal to the server.
+	CloseSend() error
 
 	// Close closes the connection.
 	Close() error
@@ -104,16 +104,13 @@ type WebSocketTransport struct {
 	once    sync.Once
 	resOnce sync.Once
 
-	m      sync.Mutex
 	closed bool
 }
 
 func (t *WebSocketTransport) Send(body io.Reader) error {
-	t.m.Lock()
 	if t.closed {
 		return ErrConnectionClosed
 	}
-	t.m.Unlock()
 
 	t.once.Do(func() {
 		h := http.Header{}
@@ -136,11 +133,9 @@ func (t *WebSocketTransport) Send(body io.Reader) error {
 }
 
 func (t *WebSocketTransport) Receive() (res io.ReadCloser, err error) {
-	t.m.Lock()
 	if t.closed {
 		return nil, ErrConnectionClosed
 	}
-	t.m.Unlock()
 
 	defer func() {
 		if err == nil {
@@ -172,6 +167,11 @@ func (t *WebSocketTransport) Receive() (res io.ReadCloser, err error) {
 
 	_, b, err = t.conn.ReadMessage()
 	if err != nil {
+		if cerr, ok := err.(*websocket.CloseError); ok {
+			if cerr.Code == websocket.CloseNormalClosure {
+				return nil, io.EOF
+			}
+		}
 		err = errors.Wrap(err, "failed to read response body")
 		return
 	}
@@ -188,31 +188,22 @@ func (t *WebSocketTransport) Receive() (res io.ReadCloser, err error) {
 	return
 }
 
-func (t *WebSocketTransport) Finish() (io.ReadCloser, error) {
-	defer t.conn.Close()
-
+func (t *WebSocketTransport) CloseSend() error {
+	// 0x01 means the finish send frame.
+	// ref. transports/websocket/websocket.ts
 	t.conn.WriteMessage(websocket.BinaryMessage, []byte{0x01})
-
-	res, err := t.Receive()
-	if err != nil {
-		return nil, err
-	}
-
-	err = t.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	if err != nil {
-		return nil, err
-	}
-
-	return ioutil.NopCloser(res), nil
+	return nil
 }
 
-// TODO: rename to CloseSend. It send a close signal, don't close own connection.
 func (t *WebSocketTransport) Close() error {
-	t.m.Lock()
-	defer t.m.Unlock()
+	// Send the close message.
+	err := t.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		return err
+	}
 	t.closed = true
-	// return t.conn.Close()
-	return nil
+	// Close the WebSocket connection.
+	return t.conn.Close()
 }
 
 func WebSocketTransportBuilder(host string, endpoint string) (StreamTransport, error) {
@@ -223,6 +214,7 @@ func WebSocketTransportBuilder(host string, endpoint string) (StreamTransport, e
 	if err != nil {
 		return nil, err
 	}
+
 	return &WebSocketTransport{
 		conn: conn,
 	}, nil

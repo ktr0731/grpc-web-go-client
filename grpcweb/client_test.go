@@ -98,8 +98,8 @@ func (b *stubStreamTransport) Receive() (io.ReadCloser, error) {
 	return ioutil.NopCloser(bytes.NewReader(b.res)), nil
 }
 
-func (b *stubStreamTransport) Finish() (io.ReadCloser, error) {
-	return ioutil.NopCloser(bytes.NewReader(b.res)), nil
+func (b *stubStreamTransport) CloseSend() error {
+	return nil
 }
 
 func (b *stubStreamTransport) Close() error {
@@ -307,9 +307,6 @@ func TestClientE2E(t *testing.T) {
 		}
 
 		time.Sleep(10 * time.Second)
-
-		err = s.Close()
-		require.NoError(t, err)
 	})
 }
 

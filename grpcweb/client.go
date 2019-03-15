@@ -203,7 +203,11 @@ func (c *clientStreamClient) Send(req *Request) error {
 }
 
 func (c *clientStreamClient) CloseAndReceive() (*Response, error) {
-	res, err := c.t.Finish()
+	err := c.t.CloseSend()
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.t.Receive()
 	if err != nil {
 		return nil, err
 	}
@@ -262,6 +266,8 @@ func (c *bidiStreamClient) Send(req *Request) error {
 	return c.t.Send(r)
 }
 
+var grpcStatusBytes = []byte("Grpc-Status: ")
+
 func (c *bidiStreamClient) Receive() (*Response, error) {
 	res, err := c.t.Receive()
 	if err != nil {
@@ -273,9 +279,15 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 		return nil, err
 	}
 
+	// If trailers appeared, notify it by returning io.EOF.
+	if bytes.HasPrefix(resBody, grpcStatusBytes) {
+		c.t.Close()
+		return nil, io.EOF
+	}
+
 	contentProto := proto.Clone(c.req.out)
 	if err := c.codec.Unmarshal(resBody, contentProto); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal response body")
+		return nil, errors.Wrapf(err, "failed to unmarshal response body. body = '%s'", string(resBody))
 	}
 
 	return &Response{
@@ -284,8 +296,9 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 	}, nil
 }
 
+// CloseSend sends a close signal and closes the send direction of the stream.
 func (c *bidiStreamClient) CloseSend() error {
-	return c.t.Close()
+	return c.t.CloseSend()
 }
 
 // BidiStreamClient instantiates bidirectional streaming client.
