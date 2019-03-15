@@ -2,7 +2,10 @@
 [![GoDoc](https://godoc.org/github.com/ktr0731/grpc-web-go-client/grpcweb?status.svg)](https://godoc.org/github.com/ktr0731/grpc-web-go-client/grpcweb)
 [![CircleCI](https://circleci.com/gh/ktr0731/grpc-web-go-client.svg?style=svg)](https://circleci.com/gh/ktr0731/grpc-web-go-client)  
 
-gRPC Web client written in Go
+*THE IMPLEMENTATION IS LACKING*
+
+gRPC Web client written in Go.
+
 
 ## Usage
 The server is [here](github.com/ktr0731/grpc-test).  
