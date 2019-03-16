@@ -74,7 +74,6 @@ func (t *HTTPTransport) Send(ctx context.Context, body io.Reader) (io.ReadCloser
 }
 
 func (t *HTTPTransport) Close() error {
-	t.client.CloseIdleConnections()
 	return nil
 }
 
