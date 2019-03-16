@@ -77,7 +77,10 @@ func (c *Client) Unary(ctx context.Context, req *Request) (*Response, error) {
 		return nil, errors.Wrap(err, "failed to build the request body")
 	}
 
-	rawBody, err := c.tb(c.host, req).Send(ctx, r)
+	t := c.tb(c.host, req)
+	defer t.Close()
+
+	rawBody, err := t.Send(ctx, r)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to send the request")
 	}
@@ -144,6 +147,7 @@ func (c *serverStreamClient) Receive() (*Response, error) {
 // ServerStreamClient sends only one request and receives multi responses through a stream.
 func (c *Client) ServerStreaming(ctx context.Context, req *Request) (ServerStreamClient, error) {
 	t := c.tb(c.host, req)
+	defer t.Close()
 
 	r, err := parseRequestBody(c.codec, req.in)
 	if err != nil {

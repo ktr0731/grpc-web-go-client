@@ -33,6 +33,7 @@ var (
 // Transport is created only one per one request, MUST not use used transport again.
 type Transport interface {
 	Send(ctx context.Context, body io.Reader) (io.ReadCloser, error)
+	Close() error
 }
 
 type HTTPTransport struct {
@@ -70,6 +71,11 @@ func (t *HTTPTransport) Send(ctx context.Context, body io.Reader) (io.ReadCloser
 	}
 
 	return res.Body, nil
+}
+
+func (t *HTTPTransport) Close() error {
+	t.client.CloseIdleConnections()
+	return nil
 }
 
 func HTTPTransportBuilder(host string, req *Request) Transport {
