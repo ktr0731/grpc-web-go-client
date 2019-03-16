@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +16,10 @@ import (
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
 	"github.com/ktr0731/grpc-test/server"
+	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-var defaultAddr = "localhost:50051"
 
 func p(s string) *string {
 	return &s
@@ -86,6 +86,10 @@ func (t *stubTransport) Send(_ context.Context, body io.Reader) (io.ReadCloser, 
 	return ioutil.NopCloser(bytes.NewReader(t.res)), nil
 }
 
+func (t *stubTransport) Close() error {
+	return nil
+}
+
 type stubStreamTransport struct {
 	res []byte
 }
@@ -133,12 +137,12 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("NewClient returns new API client", func(t *testing.T) {
-		client := NewClient(defaultAddr, withStubTransport(&stubTransport{}, nil))
+		client := NewClient("localhost:50051", withStubTransport(&stubTransport{}, nil))
 		assert.NotNil(t, client)
 	})
 
 	t.Run("Send an unary API", func(t *testing.T) {
-		client := NewClient(defaultAddr, withStubTransport(&stubTransport{
+		client := NewClient("localhost:50051", withStubTransport(&stubTransport{
 			res: readFile(t, "unary_ktr.out"),
 		}, nil))
 
@@ -150,7 +154,7 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("Send a server streaming API", func(t *testing.T) {
-		client := NewClient(defaultAddr, withStubTransport(&stubTransport{
+		client := NewClient("localhost:50051", withStubTransport(&stubTransport{
 			res: readFile(t, "server_ktr.out"),
 		}, nil))
 
@@ -177,9 +181,10 @@ func TestClientE2E(t *testing.T) {
 	service := pkg.getServiceByName(t, "Example")
 
 	t.Run("Unary", func(t *testing.T) {
-		defer server.New(false).Serve(nil, true).Stop()
+		srv, port := newServer(t, false, false)
+		defer srv.Serve().Stop()
 
-		client := NewClient(defaultAddr)
+		client := NewClient("localhost:" + port)
 		endpoint := ToEndpoint("api", service, service.GetMethod()[0])
 
 		in := pkg.getMessageTypeByName(t, "SimpleRequest")
@@ -204,9 +209,10 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("ServerStreaming", func(t *testing.T) {
-		defer server.New(false).Serve(nil, true).Stop()
+		srv, port := newServer(t, false, false)
+		defer srv.Serve().Stop()
 
-		client := NewClient(defaultAddr)
+		client := NewClient("localhost:" + port)
 		endpoint := ToEndpoint("api", service, service.GetMethod()[10])
 		assert.Equal(t, endpoint, "/api.Example/ServerStreaming")
 
@@ -219,7 +225,7 @@ func TestClientE2E(t *testing.T) {
 		s, err := client.ServerStreaming(context.Background(), req)
 		assert.NoError(t, err)
 
-		for i := 0; ; i++ {
+		for i := 1; ; i++ {
 			res, err := s.Receive()
 			if err == io.EOF {
 				break
@@ -232,9 +238,10 @@ func TestClientE2E(t *testing.T) {
 	})
 
 	t.Run("ClientStreaming", func(t *testing.T) {
-		defer server.New(false).Serve(nil, true).Stop()
+		srv, port := newServer(t, false, false)
+		defer srv.Serve().Stop()
 
-		client := NewClient(defaultAddr)
+		client := NewClient("localhost:" + port)
 		endpoint := ToEndpoint("api", service, service.GetMethod()[9])
 		assert.Equal(t, endpoint, "/api.Example/ClientStreaming")
 
@@ -243,9 +250,12 @@ func TestClientE2E(t *testing.T) {
 		s, err := client.ClientStreaming(context.Background())
 		assert.NoError(t, err)
 
-		for i := 0; i < 3; i++ {
+		i := 0
+		names := make([]string, 3)
+		for ; i < 3; i++ {
 			in := pkg.getMessageTypeByName(t, "SimpleRequest")
-			in.SetFieldByName("name", fmt.Sprintf("ktr%d", i))
+			names[i] = fmt.Sprintf("ktr%d", i)
+			in.SetFieldByName("name", names[i])
 			req := NewRequest(endpoint, in, out)
 
 			err = s.Send(req)
@@ -255,14 +265,15 @@ func TestClientE2E(t *testing.T) {
 		res, err := s.CloseAndReceive()
 		require.NoError(t, err)
 
-		expected := "ktr2, you greet 3 times."
+		expected := fmt.Sprintf("you sent requests %d times (%s).", i, strings.Join(names, ", "))
 		assert.Equal(t, expected, extractMessage(t, res))
 	})
 
 	t.Run("BidiStreaming", func(t *testing.T) {
-		defer server.New(false).Serve(nil, true).Stop()
+		srv, port := newServer(t, false, false)
+		defer srv.Serve().Stop()
 
-		client := NewClient(defaultAddr)
+		client := NewClient("localhost:" + port)
 		endpoint := ToEndpoint("api", service, service.GetMethod()[11])
 		assert.Equal(t, endpoint, "/api.Example/BidiStreaming")
 
@@ -321,4 +332,20 @@ func extractMessage(t *testing.T, res *Response) string {
 	require.True(t, ok)
 
 	return s
+}
+
+func newServer(t *testing.T, useReflection, useTLS bool) (*server.Server, string) {
+	port, err := freeport.GetFreePort()
+	require.NoError(t, err, "failed to get a free port for gRPC test server")
+
+	addr := fmt.Sprintf(":%d", port)
+	opts := []server.Option{server.WithAddr(addr), server.WithProtocol(server.ProtocolImprobableGRPCWeb)}
+	if useReflection {
+		opts = append(opts, server.WithReflection())
+	}
+	if useTLS {
+		opts = append(opts, server.WithTLS())
+	}
+
+	return server.New(opts...), strconv.Itoa(port)
 }

@@ -217,6 +217,10 @@ func (c *clientStreamClient) CloseAndReceive() (*Response, error) {
 	}
 	defer res.Close()
 
+	if err := c.t.Close(); err != nil {
+		return nil, err
+	}
+
 	resBody, err := parseResponseBody(res)
 	if err != nil {
 		return nil, err
@@ -305,7 +309,13 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 
 // CloseSend sends a close signal and closes the send direction of the stream.
 func (c *bidiStreamClient) CloseSend() error {
-	return c.t.CloseSend()
+	if err := c.t.CloseSend(); err != nil {
+		return err
+	}
+	if err := c.t.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // BidiStreamClient instantiates bidirectional streaming client.
