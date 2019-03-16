@@ -283,6 +283,7 @@ func TestClientE2E(t *testing.T) {
 		req := NewRequest(endpoint, in, out)
 		s, err := client.BidiStreaming(context.Background(), req)
 		require.NoError(t, err)
+		defer s.CloseSend()
 
 		done := make(chan struct{})
 		go func() {
