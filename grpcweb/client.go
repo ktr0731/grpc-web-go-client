@@ -292,7 +292,9 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 
 	// If trailers appeared, notify it by returning io.EOF.
 	if bytes.HasPrefix(resBody, gRPCStatusBytes) || bytes.HasPrefix(resBody, canonicalGRPCStatusBytes) {
-		c.t.Close()
+		if err := c.t.Close(); err != nil {
+			return nil, err
+		}
 		return nil, io.EOF
 	}
 
@@ -309,13 +311,7 @@ func (c *bidiStreamClient) Receive() (*Response, error) {
 
 // CloseSend sends a close signal and closes the send direction of the stream.
 func (c *bidiStreamClient) CloseSend() error {
-	if err := c.t.CloseSend(); err != nil {
-		return err
-	}
-	if err := c.t.Close(); err != nil {
-		return err
-	}
-	return nil
+	return c.t.CloseSend()
 }
 
 // BidiStreamClient instantiates bidirectional streaming client.
