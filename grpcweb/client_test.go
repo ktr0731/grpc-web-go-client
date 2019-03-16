@@ -290,7 +290,7 @@ func TestClientE2E(t *testing.T) {
 			defer close(done)
 			for {
 				res, err := s.Receive()
-				if err == ErrConnectionClosed {
+				if err == ErrConnectionClosed || err == io.EOF {
 					return
 				}
 				// TODO: use testing.T

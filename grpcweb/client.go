@@ -117,7 +117,16 @@ type serverStreamClient struct {
 
 // Receive receives multi responses through a stream.
 // Receive returns io.EOF at the end.
-func (c *serverStreamClient) Receive() (*Response, error) {
+func (c *serverStreamClient) Receive() (_ *Response, err error) {
+	defer func() {
+		if err == io.EOF {
+			if rerr := c.t.Close(); rerr != nil {
+				err = rerr
+			}
+			c.resStream.Close()
+		}
+	}()
+
 	resBody, err := parseResponseBody(c.resStream)
 	if err == io.EOF {
 		return nil, err
