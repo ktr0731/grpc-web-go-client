@@ -17,15 +17,21 @@ type Request struct {
 //
 //   "/{package name}.{service name}/{method name}"
 //
+// in and out must be proto.Message.
 func NewRequest(
 	endpoint string,
-	in proto.Message,
-	out proto.Message,
+	in interface{},
+	out interface{},
 ) *Request {
+	defer func() {
+		if err := recover(); err != nil {
+			panic("currently, ktr0731/grpc-web-go-client only supports Protocol Buffers as a codec")
+		}
+	}()
 	return &Request{
 		endpoint: endpoint,
-		in:       in,
-		out:      out,
+		in:       in.(proto.Message),
+		out:      out.(proto.Message),
 	}
 }
 
