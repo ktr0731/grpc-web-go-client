@@ -1,15 +1,54 @@
 package grpcweb
 
 import (
+	"bytes"
 	"context"
 	"io"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 )
 
-type ClientStream interface{}
+type ClientStream interface {
+	Send(ctx context.Context, req interface{}) error
+	CloseAndReceive(ctx context.Context, res interface{}) error
+}
+
+type clientStream struct {
+	endpoint    string
+	transport   transport.ClientStreamTransport
+	callOptions *callOptions
+}
+
+func (s *clientStream) Send(ctx context.Context, req interface{}) error {
+	r, err := parseRequestBody(s.callOptions.codec, req)
+	if err != nil {
+		return errors.Wrap(err, "failed to build the request")
+	}
+	if err := s.transport.Send(ctx, r); err != nil {
+		return errors.Wrap(err, "failed to send the request")
+	}
+	return nil
+}
+
+func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) error {
+	if err := s.transport.CloseSend(); err != nil {
+		return errors.Wrap(err, "failed to close the send stream")
+	}
+	rawBody, err := s.transport.Receive(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to receive the response")
+	}
+	resBody, err := parseResponseBody(rawBody)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse the response body")
+	}
+
+	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
+		return errors.Wrap(err, "failed to unmarshal the response body")
+	}
+	return nil
+}
 
 type ServerStream interface {
 	Send(ctx context.Context, req interface{}) error
@@ -73,31 +112,48 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 	return nil
 }
 
-// TODO: remove it
-
-type Request struct {
-	endpoint string
-	in, out  proto.Message
-}
-type Response struct {
-	ContentType string
-	Content     interface{}
-}
-type BidiStreamClient interface {
-	Send(*Request) error
-	Receive() (*Response, error)
+type BidiStream interface {
+	Send(ctx context.Context, req interface{}) error
+	Receive(ctx context.Context, res interface{}) error
 	CloseSend() error
 }
 
-func (c *ClientConn) BidiStreaming(context.Context, *Request) (BidiStreamClient, error) {
-	return nil, nil
+type bidiStream struct {
+	*clientStream
 }
 
-func NewRequest(
-	endpoint string,
-	in interface{},
-	out interface{},
-) *Request {
-	panic("remove")
+var (
+	canonicalGRPCStatusBytes = []byte("Grpc-Status: ")
+	gRPCStatusBytes          = []byte("grpc-status: ")
+)
+
+func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
+	rawBody, err := s.transport.Receive(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to receive the response")
+	}
+	resBody, err := parseResponseBody(rawBody)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse the response body")
+	}
+
+	// If trailers appeared, notify it by returning io.EOF.
+	if bytes.HasPrefix(resBody, gRPCStatusBytes) || bytes.HasPrefix(resBody, canonicalGRPCStatusBytes) {
+		if err := s.transport.Close(); err != nil {
+			return errors.Wrap(err, "failed to close the gRPC transport")
+		}
+		return io.EOF
+	}
+
+	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
+		return errors.Wrap(err, "failed to unmarshal the response body")
+	}
+	return nil
+}
+
+func (s *bidiStream) CloseSend() error {
+	if err := s.transport.CloseSend(); err != nil {
+		return errors.Wrap(err, "failed to close the send stream")
+	}
 	return nil
 }

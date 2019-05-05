@@ -58,18 +58,42 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 	return nil
 }
 
-func (c *ClientConn) NewClientStram(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...CallOption) (ClientStream, error) {
-	return nil, nil
+func (c *ClientConn) NewClientStream(desc *grpc.StreamDesc, method string, opts ...CallOption) (ClientStream, error) {
+	if !desc.ClientStreams {
+		return nil, errors.New("not a client stream RPC")
+	}
+	tr, err := transport.NewClientStream(c.host, method)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create a new transport stream")
+	}
+	return &clientStream{
+		endpoint:    method,
+		transport:   tr,
+		callOptions: c.applyCallOptions(opts),
+	}, nil
 }
 
-func (c *ClientConn) NewServerStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...CallOption) (ServerStream, error) {
+func (c *ClientConn) NewServerStream(desc *grpc.StreamDesc, method string, opts ...CallOption) (ServerStream, error) {
 	if !desc.ServerStreams {
-		return nil, errors.New("not server stream RPC")
+		return nil, errors.New("not a server stream RPC")
 	}
 	return &serverStream{
 		endpoint:    method,
 		transport:   transport.NewUnary(c.host, nil),
 		callOptions: c.applyCallOptions(opts),
+	}, nil
+}
+
+func (c *ClientConn) NewBidiStream(desc *grpc.StreamDesc, method string, opts ...CallOption) (BidiStream, error) {
+	if !desc.ServerStreams || !desc.ClientStreams {
+		return nil, errors.New("not a bidi stream RPC")
+	}
+	stream, err := c.NewClientStream(desc, method, opts...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create a new client stream")
+	}
+	return &bidiStream{
+		clientStream: stream.(*clientStream),
 	}, nil
 }
 
