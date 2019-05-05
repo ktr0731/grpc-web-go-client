@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"net/url"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
@@ -30,12 +29,7 @@ func DialContext(host string, opts ...DialOption) (*ClientConn, error) {
 }
 
 func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply interface{}, opts ...CallOption) error {
-	callOpts := append(c.dialOptions.defaultCallOptions, opts...)
-	callOptions := defaultCallOptions
-	for _, o := range callOpts {
-		o(&callOptions)
-	}
-
+	callOptions := c.applyCallOptions(opts)
 	codec := callOptions.codec
 
 	r, err := parseRequestBody(codec, args)
@@ -43,14 +37,11 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 		return errors.Wrap(err, "failed to build the request body")
 	}
 
-	tr := transport.NewUnary()
+	tr := transport.NewUnary(c.host, nil)
 	defer tr.Close()
 
-	// TODO: HTTPS support.
-	u := url.URL{Scheme: "http", Host: c.host, Path: method}
-
 	contentType := "application/grpc-web+" + codec.Name()
-	rawBody, err := tr.Send(ctx, u.String(), contentType, r)
+	rawBody, err := tr.Send(ctx, method, contentType, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
@@ -72,7 +63,23 @@ func (c *ClientConn) NewClientStram(ctx context.Context, desc *grpc.StreamDesc, 
 }
 
 func (c *ClientConn) NewServerStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...CallOption) (ServerStream, error) {
-	return nil, nil
+	if !desc.ServerStreams {
+		return nil, errors.New("not server stream RPC")
+	}
+	return &serverStream{
+		endpoint:    method,
+		transport:   transport.NewUnary(c.host, nil),
+		callOptions: c.applyCallOptions(opts),
+	}, nil
+}
+
+func (c *ClientConn) applyCallOptions(opts []CallOption) *callOptions {
+	callOpts := append(c.dialOptions.defaultCallOptions, opts...)
+	callOptions := defaultCallOptions
+	for _, o := range callOpts {
+		o(&callOptions)
+	}
+	return &callOptions
 }
 
 // copied from rpc_util.go#msgHeader

@@ -4,22 +4,25 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/pkg/errors"
 )
 
 type UnaryTransport interface {
-	Send(ctx context.Context, url, contentType string, body io.Reader) (io.ReadCloser, error)
+	Send(ctx context.Context, endpoint, contentType string, body io.Reader) (io.ReadCloser, error)
 	Close() error
 }
 
 type httpTransport struct {
+	host   string
 	client *http.Client
+	opts   *ConnectOptions
 
 	sent bool
 }
 
-func (t *httpTransport) Send(ctx context.Context, url, contentType string, body io.Reader) (io.ReadCloser, error) {
+func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (io.ReadCloser, error) {
 	if t.sent {
 		return nil, errors.New("Send must be called only one time per one Request")
 	}
@@ -27,6 +30,10 @@ func (t *httpTransport) Send(ctx context.Context, url, contentType string, body 
 		t.sent = true
 	}()
 
+	// TODO: HTTPS support.
+	scheme := "http"
+	u := url.URL{Scheme: scheme, Host: t.host, Path: endpoint}
+	url := u.String()
 	req, err := http.NewRequest(http.MethodPost, url, body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build the API request")
@@ -48,9 +55,11 @@ func (t *httpTransport) Close() error {
 	return nil
 }
 
-func NewUnary() UnaryTransport {
+func NewUnary(host string, opts *ConnectOptions) UnaryTransport {
 	return &httpTransport{
+		host:   host,
 		client: http.DefaultClient,
+		opts:   opts,
 	}
 }
 
