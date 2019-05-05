@@ -26,41 +26,37 @@ func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context, opts 
 		return nil, errors.New("currently, ktr0731/grpc-web-go-client does not support grpc.CallOption")
 	}
 
-	req := newRequest(nil)
-
-	stream, err := c.cc.BidiStreaming(ctx, req)
+	stream, err := c.cc.NewBidiStream(
+		&grpc.StreamDesc{ServerStreams: true, ClientStreams: true},
+		"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo")
 	if err != nil {
 		return nil, err
 	}
 
-	return &serverReflectionServerReflectionInfoClient{cc: stream}, nil
+	return &serverReflectionServerReflectionInfoClient{ctx: ctx, stream: stream}, nil
 }
 
 type serverReflectionServerReflectionInfoClient struct {
-	cc grpcweb.BidiStreamClient
+	ctx    context.Context
+	stream grpcweb.BidiStream
 
 	// To satisfy pb.ServerReflection_ServerReflectionInfoClient
 	grpc.ClientStream
 }
 
 func (x *serverReflectionServerReflectionInfoClient) Send(m *pb.ServerReflectionRequest) error {
-	req := newRequest(m)
-	return x.cc.Send(req)
+	return x.stream.Send(x.ctx, m)
 }
 
 func (x *serverReflectionServerReflectionInfoClient) Recv() (*pb.ServerReflectionResponse, error) {
-	res, err := x.cc.Receive()
+	var res pb.ServerReflectionResponse
+	err := x.stream.Receive(x.ctx, &res)
 	if err != nil {
 		return nil, err
 	}
-	return res.Content.(*pb.ServerReflectionResponse), nil
+	return &res, nil
 }
 
 func (x *serverReflectionServerReflectionInfoClient) CloseSend() error {
-	return x.cc.CloseSend()
-}
-
-func newRequest(in *pb.ServerReflectionRequest) *grpcweb.Request {
-	out := &pb.ServerReflectionResponse{}
-	return grpcweb.NewRequest("/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo", in, out)
+	return x.stream.CloseSend()
 }
