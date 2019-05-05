@@ -10,14 +10,14 @@ import (
 )
 
 type serverReflectionClient struct {
-	cc *grpcweb.ClientConn
+	cc *grpcweb.Client
 }
 
 // NewServerReflectionClient instantiates a new server reflection client.
 // most part of the implementation is same as the original grpc_reflection_v1alpha package's.
 //
 // the version (like v1alpha) is corrensponding to grpc_reflection_v1alpha package
-func NewServerReflectionClient(cc *grpcweb.ClientConn) pb.ServerReflectionClient {
+func NewServerReflectionClient(cc *grpcweb.Client) pb.ServerReflectionClient {
 	return &serverReflectionClient{cc}
 }
 
