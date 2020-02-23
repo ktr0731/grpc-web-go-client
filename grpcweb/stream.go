@@ -52,7 +52,7 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	resBody, err := parseResponseBody(rawBody)
+	_, resBody, err := parseResponseBody(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
 	}
@@ -105,7 +105,7 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 		}
 	}()
 
-	resBody, err := parseResponseBody(s.resStream)
+	_, resBody, err := parseResponseBody(s.resStream)
 	if err == io.EOF {
 		return io.EOF
 	}
@@ -145,7 +145,7 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	resBody, err := parseResponseBody(rawBody)
+	_, resBody, err := parseResponseBody(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
 	}

@@ -1,15 +1,18 @@
 package grpcweb
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
+	"strings"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/metadata"
 )
 
 type ClientConn struct {
@@ -51,9 +54,12 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 		*callOptions.header = header
 	}
 
-	resBody, err := parseResponseBody(rawBody)
+	trailer, resBody, err := parseResponseBody(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
+	}
+	if callOptions.trailer != nil {
+		*callOptions.trailer = trailer
 	}
 
 	if err := codec.Unmarshal(resBody, reply); err != nil {
@@ -135,15 +141,15 @@ func parseRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) {
 
 // copied from rpc_util#parser.recvMsg
 // TODO: compressed message
-func parseResponseBody(resBody io.Reader) ([]byte, error) {
+func parseResponseBody(resBody io.Reader) (metadata.MD, []byte, error) {
 	var h [5]byte
 	if _, err := resBody.Read(h[:]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	length := binary.BigEndian.Uint32(h[1:])
 	if length == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// TODO: check message size
@@ -153,8 +159,44 @@ func parseResponseBody(resBody io.Reader) ([]byte, error) {
 		if err == io.EOF && int(n) != int(length) {
 			err = io.ErrUnexpectedEOF
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
-	return content, nil
+	// Trailer.
+
+	_, err := resBody.Read(h[:])
+	if err == io.EOF {
+		return nil, content, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	length = binary.BigEndian.Uint32(h[1:])
+	if length == 0 {
+		return nil, nil, nil
+	}
+
+	var readLen uint32
+	trailer := metadata.New(nil)
+	s := bufio.NewScanner(resBody)
+	for s.Scan() {
+		readLen += uint32(len(s.Bytes()))
+		if readLen > length {
+			return nil, nil, io.ErrUnexpectedEOF
+		}
+
+		t := s.Text()
+		i := strings.Index(t, ": ")
+		if i == -1 {
+			return nil, nil, io.ErrUnexpectedEOF
+		}
+		k := strings.ToLower(t[:i])
+		if k == "grpc-status" || k == "grpc-message" { // Ignore non custom metadata.
+			continue
+		}
+		trailer.Append(k, t[i+2:])
+	}
+
+	return trailer, content, nil
 }
