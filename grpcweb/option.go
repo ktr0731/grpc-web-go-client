@@ -4,6 +4,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/encoding/proto"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -40,7 +41,8 @@ func WithTransportCredentials(creds credentials.TransportCredentials) DialOption
 }
 
 type callOptions struct {
-	codec encoding.Codec
+	codec           encoding.Codec
+	header, trailer *metadata.MD
 }
 
 type CallOption func(*callOptions)
@@ -48,5 +50,17 @@ type CallOption func(*callOptions)
 func ForceCodec(codec encoding.Codec) CallOption {
 	return func(opt *callOptions) {
 		opt.codec = codec
+	}
+}
+
+func Header(h *metadata.MD) CallOption {
+	return func(opt *callOptions) {
+		opt.header = h
+	}
+}
+
+func Trailer(t *metadata.MD) CallOption {
+	return func(opt *callOptions) {
+		opt.trailer = t
 	}
 }

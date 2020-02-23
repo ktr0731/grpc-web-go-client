@@ -7,9 +7,14 @@ import (
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/metadata"
 )
 
 type ClientStream interface {
+	// Header returns the response header.
+	Header() (metadata.MD, error)
+	// Trailer returns the response trailer.
+	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	CloseAndReceive(ctx context.Context, res interface{}) error
 }
@@ -18,6 +23,14 @@ type clientStream struct {
 	endpoint    string
 	transport   transport.ClientStreamTransport
 	callOptions *callOptions
+}
+
+func (s *clientStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *clientStream) Trailer() metadata.MD {
+	return nil
 }
 
 func (s *clientStream) Send(ctx context.Context, req interface{}) error {
@@ -71,7 +84,7 @@ func (s *serverStream) Send(ctx context.Context, req interface{}) error {
 	}
 
 	contentType := "application/grpc-web+" + codec.Name()
-	rawBody, err := s.transport.Send(ctx, s.endpoint, contentType, r)
+	_, rawBody, err := s.transport.Send(ctx, s.endpoint, contentType, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}

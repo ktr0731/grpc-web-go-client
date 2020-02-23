@@ -12,10 +12,11 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/metadata"
 )
 
 type UnaryTransport interface {
-	Send(ctx context.Context, endpoint, contentType string, body io.Reader) (io.ReadCloser, error)
+	Send(ctx context.Context, endpoint, contentType string, body io.Reader) (metadata.MD, io.ReadCloser, error)
 	Close() error
 }
 
@@ -27,9 +28,9 @@ type httpTransport struct {
 	sent bool
 }
 
-func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (io.ReadCloser, error) {
+func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (metadata.MD, io.ReadCloser, error) {
 	if t.sent {
-		return nil, errors.New("Send must be called only one time per one Request")
+		return nil, nil, errors.New("Send must be called only one time per one Request")
 	}
 	defer func() {
 		t.sent = true
@@ -41,7 +42,7 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 	url := u.String()
 	req, err := http.NewRequest(http.MethodPost, url, body)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build the API request")
+		return nil, nil, errors.Wrap(err, "failed to build the API request")
 	}
 
 	req.Header.Add("content-type", contentType)
@@ -49,10 +50,15 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 
 	res, err := t.client.Do(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to send the API")
+		return nil, nil, errors.Wrap(err, "failed to send the API")
 	}
 
-	return res.Body, nil
+	md := metadata.New(nil)
+	for k, v := range res.Header {
+		md.Append(k, v...)
+	}
+
+	return md, res.Body, nil
 }
 
 func (t *httpTransport) Close() error {
@@ -69,6 +75,9 @@ func NewUnary(host string, opts *ConnectOptions) UnaryTransport {
 }
 
 type ClientStreamTransport interface {
+	Header() (metadata.MD, error)
+	Trailer() metadata.MD
+
 	Send(ctx context.Context, body io.Reader) error
 	Receive(ctx context.Context) (io.ReadCloser, error)
 
@@ -97,6 +106,14 @@ type webSocketTransport struct {
 	closed bool
 
 	writeMu sync.Mutex
+}
+
+func (t *webSocketTransport) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (t *webSocketTransport) Trailer() metadata.MD {
+	return nil
 }
 
 func (t *webSocketTransport) Send(ctx context.Context, body io.Reader) error {

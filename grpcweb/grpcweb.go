@@ -41,11 +41,15 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 	defer tr.Close()
 
 	contentType := "application/grpc-web+" + codec.Name()
-	rawBody, err := tr.Send(ctx, method, contentType, r)
+	header, rawBody, err := tr.Send(ctx, method, contentType, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
 	defer rawBody.Close()
+
+	if callOptions.header != nil {
+		*callOptions.header = header
+	}
 
 	resBody, err := parseResponseBody(rawBody)
 	if err != nil {
