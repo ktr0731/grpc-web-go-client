@@ -143,53 +143,88 @@ func parseRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) {
 // TODO: compressed message
 func parseResponseBody(resBody io.Reader) (metadata.MD, []byte, error) {
 	var h [5]byte
-	if _, err := resBody.Read(h[:]); err != nil {
+	n, err := resBody.Read(h[:])
+	if err != nil {
 		return nil, nil, err
 	}
+	if n != len(h) {
+		return nil, nil, io.ErrUnexpectedEOF
+	}
 
+	flag := h[0]
 	length := binary.BigEndian.Uint32(h[1:])
 	if length == 0 {
 		return nil, nil, nil
 	}
 
-	// TODO: check message size
-
-	content := make([]byte, int(length))
-	if n, err := resBody.Read(content); err != nil {
-		if err == io.EOF && int(n) != int(length) {
-			err = io.ErrUnexpectedEOF
+	var content []byte
+	if flag == 0x00 || flag == 0x01 { // Flag is for compressed flag.
+		content, err = parseLengthPrefixedMessage(resBody, int(length))
+		if err != nil {
+			return nil, nil, err
 		}
-		return nil, nil, err
+
+		// Read trailer header.
+
+		_, err = resBody.Read(h[:])
+		if err == io.EOF {
+			return nil, content, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+
+		flag = h[0]
+		length = binary.BigEndian.Uint32(h[1:])
+		if length == 0 {
+			return nil, content, nil
+		}
 	}
 
 	// Trailer.
 
-	_, err := resBody.Read(h[:])
-	if err == io.EOF {
-		return nil, content, nil
+	if flag>>7 != 0x01 {
+		return nil, nil, io.ErrUnexpectedEOF
 	}
+
+	trailer, err := parseTrailer(resBody, int(length))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	length = binary.BigEndian.Uint32(h[1:])
-	if length == 0 {
-		return nil, nil, nil
-	}
+	return trailer, content, nil
+}
 
-	var readLen uint32
+func parseLengthPrefixedMessage(r io.Reader, length int) ([]byte, error) {
+	// TODO: check message size
+	content := make([]byte, length)
+	n, err := r.Read(content)
+	if err == io.EOF {
+		if int(n) != length {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return content, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return content, nil
+}
+
+func parseTrailer(r io.Reader, length int) (metadata.MD, error) {
+	var readLen int
 	trailer := metadata.New(nil)
-	s := bufio.NewScanner(resBody)
+	s := bufio.NewScanner(r)
 	for s.Scan() {
-		readLen += uint32(len(s.Bytes()))
+		readLen += len(s.Bytes())
 		if readLen > length {
-			return nil, nil, io.ErrUnexpectedEOF
+			return nil, io.ErrUnexpectedEOF
 		}
 
 		t := s.Text()
 		i := strings.Index(t, ": ")
 		if i == -1 {
-			return nil, nil, io.ErrUnexpectedEOF
+			return nil, io.ErrUnexpectedEOF
 		}
 		k := strings.ToLower(t[:i])
 		if k == "grpc-status" || k == "grpc-message" { // Ignore non custom metadata.
@@ -198,5 +233,8 @@ func parseResponseBody(resBody io.Reader) (metadata.MD, []byte, error) {
 		trailer.Append(k, t[i+2:])
 	}
 
-	return trailer, content, nil
+	if trailer.Len() == 0 {
+		return nil, nil
+	}
+	return trailer, nil
 }
