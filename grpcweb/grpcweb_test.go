@@ -7,7 +7,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/ktr0731/grpc-test/api"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func Test_parseResponseBody(t *testing.T) {
@@ -15,11 +17,13 @@ func Test_parseResponseBody(t *testing.T) {
 		fname           string
 		expectedTrailer metadata.MD
 		expectedContent api.SimpleResponse
+		expectedStatus  *status.Status
 		wantErr         bool
 	}{
 		"normal (only response)": {
 			fname:           "response",
 			expectedContent: api.SimpleResponse{Message: "hello, ktr"},
+			expectedStatus:  status.New(codes.OK, ""),
 		},
 		"normal (trailer and response)": {
 			fname: "trailer_response",
@@ -28,6 +32,7 @@ func Test_parseResponseBody(t *testing.T) {
 				"trailer_key2": "trailer_val2",
 			}),
 			expectedContent: api.SimpleResponse{Message: "response"},
+			expectedStatus:  status.New(codes.OK, ""),
 		},
 		"error (trailer and response)": {
 			fname: "trailer_response_error",
@@ -35,6 +40,7 @@ func Test_parseResponseBody(t *testing.T) {
 				"trailer_key1": "trailer_val1",
 				"trailer_key2": "trailer_val2",
 			}),
+			expectedStatus: status.New(codes.Internal, "internal error"),
 		},
 	}
 
@@ -46,7 +52,7 @@ func Test_parseResponseBody(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open should not return an error, but got '%s'", err)
 			}
-			actualTrailer, actualContent, err := parseResponseBody(r)
+			actualStatus, actualTrailer, actualContent, err := parseResponseBody(r)
 			if c.wantErr {
 				if err == nil {
 					t.Errorf("expected an error, but got nil")
@@ -66,6 +72,12 @@ func Test_parseResponseBody(t *testing.T) {
 			}
 			if diff := cmp.Diff(c.expectedContent, res); diff != "" {
 				t.Errorf("-want, +got\n%s", diff)
+			}
+			if c.expectedStatus.Code() != actualStatus.Code() {
+				t.Errorf("expected code: %s, but got %s", c.expectedStatus.Code(), actualStatus.Code())
+			}
+			if c.expectedStatus.Message() != actualStatus.Message() {
+				t.Errorf("expected message: %s, but got %s", c.expectedStatus.Message(), actualStatus.Message())
 			}
 		})
 	}

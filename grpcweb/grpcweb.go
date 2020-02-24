@@ -6,13 +6,16 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type ClientConn struct {
@@ -54,7 +57,7 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 		*callOptions.header = header
 	}
 
-	trailer, resBody, err := parseResponseBody(rawBody)
+	status, trailer, resBody, err := parseResponseBody(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
 	}
@@ -65,7 +68,7 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 	if err := codec.Unmarshal(resBody, reply); err != nil {
 		return errors.Wrapf(err, "failed to unmarshal response body by codec %s", codec.Name())
 	}
-	return nil
+	return status.Err()
 }
 
 func (c *ClientConn) NewClientStream(desc *grpc.StreamDesc, method string, opts ...CallOption) (ClientStream, error) {
@@ -141,58 +144,58 @@ func parseRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) {
 
 // copied from rpc_util#parser.recvMsg
 // TODO: compressed message
-func parseResponseBody(resBody io.Reader) (metadata.MD, []byte, error) {
+func parseResponseBody(resBody io.Reader) (*status.Status, metadata.MD, []byte, error) {
 	var h [5]byte
 	n, err := resBody.Read(h[:])
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if n != len(h) {
-		return nil, nil, io.ErrUnexpectedEOF
+		return nil, nil, nil, io.ErrUnexpectedEOF
 	}
 
 	flag := h[0]
 	length := binary.BigEndian.Uint32(h[1:])
 	if length == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	var content []byte
 	if flag == 0x00 || flag == 0x01 { // Flag is for compressed flag.
 		content, err = parseLengthPrefixedMessage(resBody, int(length))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		// Read trailer header.
 
 		_, err = resBody.Read(h[:])
 		if err == io.EOF {
-			return nil, content, nil
+			return nil, nil, content, nil
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		flag = h[0]
 		length = binary.BigEndian.Uint32(h[1:])
 		if length == 0 {
-			return nil, content, nil
+			return nil, nil, content, nil
 		}
 	}
 
 	// Trailer.
 
 	if flag>>7 != 0x01 {
-		return nil, nil, io.ErrUnexpectedEOF
+		return nil, nil, nil, io.ErrUnexpectedEOF
 	}
 
-	trailer, err := parseTrailer(resBody, int(length))
+	status, trailer, err := parseTrailer(resBody, int(length))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return trailer, content, nil
+	return status, trailer, content, nil
 }
 
 func parseLengthPrefixedMessage(r io.Reader, length int) ([]byte, error) {
@@ -211,30 +214,46 @@ func parseLengthPrefixedMessage(r io.Reader, length int) ([]byte, error) {
 	return content, nil
 }
 
-func parseTrailer(r io.Reader, length int) (metadata.MD, error) {
-	var readLen int
+func parseTrailer(r io.Reader, length int) (*status.Status, metadata.MD, error) {
+	var (
+		readLen int
+		code    codes.Code
+		msg     string
+	)
 	trailer := metadata.New(nil)
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		readLen += len(s.Bytes())
 		if readLen > length {
-			return nil, io.ErrUnexpectedEOF
+			return nil, nil, io.ErrUnexpectedEOF
 		}
 
 		t := s.Text()
 		i := strings.Index(t, ": ")
 		if i == -1 {
-			return nil, io.ErrUnexpectedEOF
+			return nil, nil, io.ErrUnexpectedEOF
 		}
 		k := strings.ToLower(t[:i])
-		if k == "grpc-status" || k == "grpc-message" { // Ignore non custom metadata.
+		if k == "grpc-status" {
+			n, err := strconv.ParseUint(t[i+2:], 10, 32)
+			if err != nil {
+				code = codes.Unknown
+			} else {
+				code = codes.Code(uint32(n))
+			}
+			continue
+		}
+		if k == "grpc-message" {
+			msg = t[i+2:]
 			continue
 		}
 		trailer.Append(k, t[i+2:])
 	}
 
+	stat := status.New(code, msg)
+
 	if trailer.Len() == 0 {
-		return nil, nil
+		return stat, nil, nil
 	}
-	return trailer, nil
+	return stat, trailer, nil
 }

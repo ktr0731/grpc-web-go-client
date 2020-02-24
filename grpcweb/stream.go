@@ -52,7 +52,7 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	_, resBody, err := parseResponseBody(rawBody)
+	status, _, resBody, err := parseResponseBody(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
 	}
@@ -60,7 +60,7 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
 		return errors.Wrap(err, "failed to unmarshal the response body")
 	}
-	return nil
+	return status.Err()
 }
 
 type ServerStream interface {
@@ -105,7 +105,7 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 		}
 	}()
 
-	_, resBody, err := parseResponseBody(s.resStream)
+	status, _, resBody, err := parseResponseBody(s.resStream)
 	if err == io.EOF {
 		return io.EOF
 	}
@@ -122,7 +122,7 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
 		return errors.Wrap(err, "failed to unmarshal response body")
 	}
-	return nil
+	return status.Err()
 }
 
 type BidiStream interface {
@@ -145,7 +145,7 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	_, resBody, err := parseResponseBody(rawBody)
+	status, _, resBody, err := parseResponseBody(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
 	}
@@ -161,7 +161,7 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
 		return errors.Wrap(err, "failed to unmarshal the response body")
 	}
-	return nil
+	return status.Err()
 }
 
 func (s *bidiStream) CloseSend() error {
