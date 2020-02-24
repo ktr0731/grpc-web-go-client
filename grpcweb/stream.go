@@ -1,12 +1,13 @@
 package grpcweb
 
 import (
-	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -52,9 +53,13 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	status, _, resBody, err := parseResponseBody(rawBody)
+	resBody, err := parseLengthPrefixedMessageFromHeader(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse the response body")
+	}
+	status, _, err := parseStatusAndTrailerFromHeader(rawBody)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return errors.Wrap(err, "failed to parse trailer")
 	}
 
 	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
@@ -105,24 +110,39 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 		}
 	}()
 
-	status, _, resBody, err := parseResponseBody(s.resStream)
-	if err == io.EOF {
-		return io.EOF
-	}
+	var h [5]byte
+	n, err := s.resStream.Read(h[:])
 	if err != nil {
-		return errors.Wrap(err, "failed to parse the response body")
+		return err
+	}
+	if n != len(h) {
+		return io.ErrUnexpectedEOF
 	}
 
-	// check compressed flag.
-	// compressed flag is 0 or 1.
-	if resBody[0]>>3 != 0 && resBody[0]>>3 != 1 {
+	flag := h[0]
+	length := binary.BigEndian.Uint32(h[1:])
+	if length == 0 {
 		return io.EOF
 	}
-
-	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
-		return errors.Wrap(err, "failed to unmarshal response body")
+	if flag == 0 || flag == 1 { // Message header.
+		msg, err := parseLengthPrefixedMessage(s.resStream, int(length))
+		if err != nil {
+			return err
+		}
+		if err := s.callOptions.codec.Unmarshal(msg, res); err != nil {
+			return errors.Wrap(err, "failed to unmarshal response body")
+		}
+		return nil
 	}
-	return status.Err()
+
+	status, _, err := parseStatusAndTrailer(s.resStream, int(length))
+	if err != nil {
+		return errors.Wrap(err, "failed to parse trailer")
+	}
+	if status.Code() != codes.OK {
+		return status.Err()
+	}
+	return io.EOF
 }
 
 type BidiStream interface {
@@ -145,23 +165,45 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	status, _, resBody, err := parseResponseBody(rawBody)
+
+	var h [5]byte
+	n, err := rawBody.Read(h[:])
 	if err != nil {
-		return errors.Wrap(err, "failed to parse the response body")
+		return err
+	}
+	if n != len(h) {
+		return io.ErrUnexpectedEOF
 	}
 
-	// If trailers appeared, notify it by returning io.EOF.
-	if bytes.HasPrefix(resBody, gRPCStatusBytes) || bytes.HasPrefix(resBody, canonicalGRPCStatusBytes) {
-		if err := s.transport.Close(); err != nil {
-			return errors.Wrap(err, "failed to close the gRPC transport")
-		}
+	flag := h[0]
+	length := binary.BigEndian.Uint32(h[1:])
+	if length == 0 {
 		return io.EOF
 	}
-
-	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
-		return errors.Wrap(err, "failed to unmarshal the response body")
+	if flag == 0 || flag == 1 { // Message header.
+		msg, err := parseLengthPrefixedMessage(rawBody, int(length))
+		if err != nil {
+			return err
+		}
+		if err := s.callOptions.codec.Unmarshal(msg, res); err != nil {
+			return errors.Wrap(err, "failed to unmarshal response body")
+		}
+		return nil
 	}
-	return status.Err()
+
+	status, _, err := parseStatusAndTrailer(rawBody, int(length))
+	if err != nil {
+		return errors.Wrap(err, "failed to parse trailer")
+	}
+
+	if err := s.transport.Close(); err != nil {
+		return errors.Wrap(err, "failed to close the gRPC transport")
+	}
+
+	if status.Code() != codes.OK {
+		return status.Err()
+	}
+	return io.EOF
 }
 
 func (s *bidiStream) CloseSend() error {

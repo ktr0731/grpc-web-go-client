@@ -57,17 +57,47 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 		*callOptions.header = header
 	}
 
-	status, trailer, resBody, err := parseResponseBody(rawBody)
+	var h [5]byte
+	n, err := rawBody.Read(h[:])
 	if err != nil {
-		return errors.Wrap(err, "failed to parse the response body")
+		return err
+	}
+	if n != len(h) {
+		return io.ErrUnexpectedEOF
+	}
+
+	flag := h[0]
+	length := binary.BigEndian.Uint32(h[1:])
+	if length == 0 {
+		return io.EOF
+	}
+	if flag == 0 || flag == 1 { // Message header.
+		resBody, err := parseLengthPrefixedMessage(rawBody, int(length))
+		if err != nil {
+			return errors.Wrap(err, "failed to parse the response body")
+		}
+		status, trailer, err := parseStatusAndTrailerFromHeader(rawBody)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse trailer")
+		}
+		if callOptions.trailer != nil {
+			*callOptions.trailer = trailer
+		}
+
+		if err := codec.Unmarshal(resBody, reply); err != nil {
+			return errors.Wrapf(err, "failed to unmarshal response body by codec %s", codec.Name())
+		}
+		return status.Err()
+	}
+
+	status, trailer, err := parseStatusAndTrailer(rawBody, int(length))
+	if err != nil {
+		return errors.Wrap(err, "failed to parse trailer")
 	}
 	if callOptions.trailer != nil {
 		*callOptions.trailer = trailer
 	}
 
-	if err := codec.Unmarshal(resBody, reply); err != nil {
-		return errors.Wrapf(err, "failed to unmarshal response body by codec %s", codec.Name())
-	}
 	return status.Err()
 }
 
@@ -142,60 +172,26 @@ func parseRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) {
 	return buf, nil
 }
 
-// copied from rpc_util#parser.recvMsg
-// TODO: compressed message
-func parseResponseBody(resBody io.Reader) (*status.Status, metadata.MD, []byte, error) {
+func parseLengthPrefixedMessageFromHeader(resBody io.Reader) ([]byte, error) {
 	var h [5]byte
 	n, err := resBody.Read(h[:])
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if n != len(h) {
-		return nil, nil, nil, io.ErrUnexpectedEOF
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	flag := h[0]
 	length := binary.BigEndian.Uint32(h[1:])
 	if length == 0 {
-		return nil, nil, nil, nil
+		return nil, io.EOF
+	}
+	if flag != 0 && flag != 1 { // Flag is for compressed flag.
+		return nil, io.ErrUnexpectedEOF
 	}
 
-	var content []byte
-	if flag == 0x00 || flag == 0x01 { // Flag is for compressed flag.
-		content, err = parseLengthPrefixedMessage(resBody, int(length))
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		// Read trailer header.
-
-		_, err = resBody.Read(h[:])
-		if err == io.EOF {
-			return nil, nil, content, nil
-		}
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		flag = h[0]
-		length = binary.BigEndian.Uint32(h[1:])
-		if length == 0 {
-			return nil, nil, content, nil
-		}
-	}
-
-	// Trailer.
-
-	if flag>>7 != 0x01 {
-		return nil, nil, nil, io.ErrUnexpectedEOF
-	}
-
-	status, trailer, err := parseTrailer(resBody, int(length))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return status, trailer, content, nil
+	return parseLengthPrefixedMessage(resBody, int(length))
 }
 
 func parseLengthPrefixedMessage(r io.Reader, length int) ([]byte, error) {
@@ -206,7 +202,7 @@ func parseLengthPrefixedMessage(r io.Reader, length int) ([]byte, error) {
 		if int(n) != length {
 			return nil, io.ErrUnexpectedEOF
 		}
-		return content, nil
+		return nil, io.EOF
 	}
 	if err != nil {
 		return nil, err
@@ -214,7 +210,29 @@ func parseLengthPrefixedMessage(r io.Reader, length int) ([]byte, error) {
 	return content, nil
 }
 
-func parseTrailer(r io.Reader, length int) (*status.Status, metadata.MD, error) {
+func parseStatusAndTrailerFromHeader(r io.Reader) (*status.Status, metadata.MD, error) {
+	var h [5]byte
+	_, err := r.Read(h[:])
+	if err == io.EOF {
+		return nil, nil, io.EOF
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	flag := h[0]
+	if flag>>7 != 0x01 {
+		return nil, nil, io.ErrUnexpectedEOF
+	}
+	length := binary.BigEndian.Uint32(h[1:])
+	if length == 0 {
+		return nil, nil, io.EOF
+	}
+
+	return parseStatusAndTrailer(r, int(length))
+}
+
+func parseStatusAndTrailer(r io.Reader, length int) (*status.Status, metadata.MD, error) {
 	var (
 		readLen int
 		code    codes.Code
