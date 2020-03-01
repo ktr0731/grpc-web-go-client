@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/codes"
@@ -35,7 +36,7 @@ func (s *clientStream) Trailer() metadata.MD {
 }
 
 func (s *clientStream) Send(ctx context.Context, req interface{}) error {
-	r, err := parseRequestBody(s.callOptions.codec, req)
+	r, err := encodeRequestBody(s.callOptions.codec, req)
 	if err != nil {
 		return errors.Wrap(err, "failed to build the request")
 	}
@@ -53,18 +54,37 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	resBody, err := parseLengthPrefixedMessageFromHeader(rawBody)
+	defer rawBody.Close()
+	resHeader, err := parser.ParseResponseHeader(rawBody)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse the response body")
-	}
-	status, _, err := parseStatusAndTrailerFromHeader(rawBody)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return errors.Wrap(err, "failed to parse trailer")
+		return errors.Wrap(err, "failed to parse response header")
 	}
 
-	if err := s.callOptions.codec.Unmarshal(resBody, res); err != nil {
-		return errors.Wrap(err, "failed to unmarshal the response body")
+	if resHeader.IsMessageHeader() {
+		resBody, err := parser.ParseLengthPrefixedMessage(rawBody, resHeader.ContentLength)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse the response body")
+		}
+		codec := s.callOptions.codec
+		if err := codec.Unmarshal(resBody, res); err != nil {
+			return errors.Wrapf(err, "failed to unmarshal response body by codec %s", codec.Name())
+		}
+
+		// TODO: fix it
+		resHeader, err = parser.ParseResponseHeader(rawBody)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse response header")
+		}
 	}
+	if !resHeader.IsTrailerHeader() {
+		return errors.New("unexpected header")
+	}
+
+	status, trailer, err := parser.ParseStatusAndTrailer(rawBody, resHeader.ContentLength)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse status and trailer")
+	}
+	_ = trailer
 	return status.Err()
 }
 
@@ -83,7 +103,7 @@ type serverStream struct {
 func (s *serverStream) Send(ctx context.Context, req interface{}) error {
 	codec := s.callOptions.codec
 
-	r, err := parseRequestBody(codec, req)
+	r, err := encodeRequestBody(codec, req)
 	if err != nil {
 		return errors.Wrap(err, "failed to build the request body")
 	}
@@ -125,7 +145,7 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 		return io.EOF
 	}
 	if flag == 0 || flag == 1 { // Message header.
-		msg, err := parseLengthPrefixedMessage(s.resStream, int(length))
+		msg, err := parser.ParseLengthPrefixedMessage(s.resStream, length)
 		if err != nil {
 			return err
 		}
@@ -135,7 +155,7 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 		return nil
 	}
 
-	status, _, err := parseStatusAndTrailer(s.resStream, int(length))
+	status, _, err := parser.ParseStatusAndTrailer(s.resStream, length)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse trailer")
 	}
@@ -181,7 +201,7 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 		return io.EOF
 	}
 	if flag == 0 || flag == 1 { // Message header.
-		msg, err := parseLengthPrefixedMessage(rawBody, int(length))
+		msg, err := parser.ParseLengthPrefixedMessage(rawBody, length)
 		if err != nil {
 			return err
 		}
@@ -191,7 +211,7 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 		return nil
 	}
 
-	status, _, err := parseStatusAndTrailer(rawBody, int(length))
+	status, _, err := parser.ParseStatusAndTrailer(rawBody, length)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse trailer")
 	}
