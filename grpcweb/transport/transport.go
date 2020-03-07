@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -8,15 +9,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
-	"google.golang.org/grpc/metadata"
 )
 
 type UnaryTransport interface {
-	Send(ctx context.Context, endpoint, contentType string, body io.Reader) (metadata.MD, io.ReadCloser, error)
+	Send(ctx context.Context, endpoint, contentType string, body io.Reader) (http.Header, io.ReadCloser, error)
 	Close() error
 }
 
@@ -28,7 +29,7 @@ type httpTransport struct {
 	sent bool
 }
 
-func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (metadata.MD, io.ReadCloser, error) {
+func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (http.Header, io.ReadCloser, error) {
 	if t.sent {
 		return nil, nil, errors.New("Send must be called only one time per one Request")
 	}
@@ -53,12 +54,7 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 		return nil, nil, errors.Wrap(err, "failed to send the API")
 	}
 
-	md := metadata.New(nil)
-	for k, v := range res.Header {
-		md.Append(k, v...)
-	}
-
-	return md, res.Body, nil
+	return res.Header, res.Body, nil
 }
 
 func (t *httpTransport) Close() error {
@@ -75,8 +71,8 @@ func NewUnary(host string, opts *ConnectOptions) UnaryTransport {
 }
 
 type ClientStreamTransport interface {
-	Header() (metadata.MD, error)
-	Trailer() metadata.MD
+	Header() (http.Header, error)
+	Trailer() http.Header
 
 	Send(ctx context.Context, body io.Reader) error
 	Receive(ctx context.Context) (io.ReadCloser, error)
@@ -106,14 +102,16 @@ type webSocketTransport struct {
 	closed bool
 
 	writeMu sync.Mutex
+
+	header, trailer http.Header
 }
 
-func (t *webSocketTransport) Header() (metadata.MD, error) {
-	return nil, nil
+func (t *webSocketTransport) Header() (http.Header, error) {
+	return t.header, nil
 }
 
-func (t *webSocketTransport) Trailer() metadata.MD {
-	return nil
+func (t *webSocketTransport) Trailer() http.Header {
+	return t.trailer
 }
 
 func (t *webSocketTransport) Send(ctx context.Context, body io.Reader) error {
@@ -145,7 +143,7 @@ func (t *webSocketTransport) Send(ctx context.Context, body io.Reader) error {
 	return t.writeMessage(websocket.BinaryMessage, b.Bytes())
 }
 
-func (t *webSocketTransport) Receive(context.Context) (res io.ReadCloser, err error) {
+func (t *webSocketTransport) Receive(context.Context) (_ io.ReadCloser, err error) {
 	if t.closed {
 		return nil, io.EOF
 	}
@@ -162,17 +160,30 @@ func (t *webSocketTransport) Receive(context.Context) (res io.ReadCloser, err er
 
 	// skip response header
 	t.resOnce.Do(func() {
-		_, _, err = t.conn.ReadMessage()
+		_, _, err = t.conn.NextReader()
 		if err != nil {
 			err = errors.Wrap(err, "failed to read response header")
 			return
 		}
 
-		_, _, err = t.conn.ReadMessage()
+		_, msg, err := t.conn.NextReader()
 		if err != nil {
 			err = errors.Wrap(err, "failed to read response header")
 			return
 		}
+
+		h := make(http.Header)
+		s := bufio.NewScanner(msg)
+		for s.Scan() {
+			t := s.Text()
+			i := strings.Index(t, ": ")
+			if i == -1 {
+				continue
+			}
+			k := strings.ToLower(t[:i])
+			h.Add(k, t[i+2:])
+		}
+		t.header = h
 	})
 
 	var buf bytes.Buffer
@@ -196,9 +207,16 @@ func (t *webSocketTransport) Receive(context.Context) (res io.ReadCloser, err er
 		return
 	}
 
-	res = ioutil.NopCloser(io.MultiReader(&buf, r))
+	res := ioutil.NopCloser(io.MultiReader(&buf, r))
 
-	return
+	by, err := ioutil.ReadAll(res)
+	if err != nil {
+		panic(err)
+	}
+
+	res = ioutil.NopCloser(bytes.NewReader(by))
+
+	return res, nil
 }
 
 func (t *webSocketTransport) CloseSend() error {

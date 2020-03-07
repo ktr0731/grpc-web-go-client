@@ -1,6 +1,7 @@
 package grpcweb
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func Test_parseResponseBody(t *testing.T) {
+func TestInvoke(t *testing.T) {
 	cases := map[string]struct {
 		fname           string
 		expectedTrailer metadata.MD
@@ -52,6 +53,16 @@ func Test_parseResponseBody(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open should not return an error, but got '%s'", err)
 			}
+
+			var trailer metadata.MD
+			client, err := DialContext(":50051")
+			if err != nil {
+				t.Fatalf("DialContext should not return an error, but got '%s'", err)
+			}
+
+			var res api.SimpleResponse
+			client.Invoke(context.Background(), "/service/Method", nil, &res)
+
 			actualStatus, actualTrailer, actualContent, err := parseResponseBody(r)
 			if c.wantErr {
 				if err == nil {

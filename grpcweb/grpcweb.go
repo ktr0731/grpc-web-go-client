@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"net/http"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/metadata"
 )
 
 type ClientConn struct {
@@ -49,7 +51,7 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 	defer rawBody.Close()
 
 	if callOptions.header != nil {
-		*callOptions.header = header
+		*callOptions.header = toMetadata(header)
 	}
 
 	resHeader, err := parser.ParseResponseHeader(rawBody)
@@ -163,4 +165,15 @@ func parseLengthPrefixedMessageFromHeader(resBody io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	return parser.ParseLengthPrefixedMessage(resBody, h.ContentLength)
+}
+
+func toMetadata(h http.Header) metadata.MD {
+	if len(h) == 0 {
+		return nil
+	}
+	md := metadata.New(nil)
+	for k, v := range h {
+		md.Append(k, v...)
+	}
+	return md
 }

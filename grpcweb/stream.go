@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"sync"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
@@ -13,9 +14,12 @@ import (
 )
 
 type ClientStream interface {
-	// Header returns the response header.
+	// Header returns the header metadata from the server, if there is any.
+	// It blocks if the metadata is not ready to read.
 	Header() (metadata.MD, error)
-	// Trailer returns the response trailer.
+	// Trailer returns the trailer metadata from the server, if there is any.
+	// It must only be called after stream.CloseAndRecv has returned, or
+	// stream.Recv has returned a non-nil error (including io.EOF).
 	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	CloseAndReceive(ctx context.Context, res interface{}) error
@@ -25,14 +29,31 @@ type clientStream struct {
 	endpoint    string
 	transport   transport.ClientStreamTransport
 	callOptions *callOptions
+
+	closed          bool
+	header, trailer metadata.MD
 }
 
 func (s *clientStream) Header() (metadata.MD, error) {
-	return nil, nil
+	if s.header == nil {
+		md := metadata.New(nil)
+		headers, err := s.transport.Header()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get headers")
+		}
+		for k, v := range headers {
+			md.Append(k, v...)
+		}
+		s.header = md
+	}
+	return s.header, nil
 }
 
 func (s *clientStream) Trailer() metadata.MD {
-	return nil
+	if !s.closed {
+		panic("Trailer must be called after stream.CloseAndReceive has been called")
+	}
+	return s.trailer
 }
 
 func (s *clientStream) Send(ctx context.Context, req interface{}) error {
@@ -54,7 +75,9 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
-	defer rawBody.Close()
+	var closeOnce sync.Once
+	defer closeOnce.Do(func() { rawBody.Close() })
+
 	resHeader, err := parser.ParseResponseHeader(rawBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse response header")
@@ -70,10 +93,19 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 			return errors.Wrapf(err, "failed to unmarshal response body by codec %s", codec.Name())
 		}
 
-		// TODO: fix it
-		resHeader, err = parser.ParseResponseHeader(rawBody)
+		closeOnce.Do(func() { rawBody.Close() })
+
+		// improbable-eng/grpc-web returns the trailer in another message.
+		rawBody2, err := s.transport.Receive(ctx)
 		if err != nil {
-			return errors.Wrap(err, "failed to parse response header")
+			return errors.Wrap(err, "failed to receive the response trailer")
+		}
+		defer rawBody2.Close()
+		rawBody = rawBody2
+
+		resHeader, err = parser.ParseResponseHeader(rawBody2)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse response header2")
 		}
 	}
 	if !resHeader.IsTrailerHeader() {
@@ -84,11 +116,19 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to parse status and trailer")
 	}
-	_ = trailer
+	s.closed = true
+	s.trailer = trailer
 	return status.Err()
 }
 
 type ServerStream interface {
+	// Header returns the header metadata from the server, if there is any.
+	// It blocks if the metadata is not ready to read.
+	Header() (metadata.MD, error)
+	// Trailer returns the trailer metadata from the server, if there is any.
+	// It must only be called after stream.CloseAndRecv has returned, or
+	// stream.Recv has returned a non-nil error (including io.EOF).
+	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	Receive(ctx context.Context, res interface{}) error
 }
@@ -98,6 +138,20 @@ type serverStream struct {
 	transport   transport.UnaryTransport
 	resStream   io.ReadCloser
 	callOptions *callOptions
+
+	closed          bool
+	header, trailer metadata.MD
+}
+
+func (s *serverStream) Header() (metadata.MD, error) {
+	return s.header, nil
+}
+
+func (s *serverStream) Trailer() metadata.MD {
+	if !s.closed {
+		panic("Trailer must be called after stream.CloseAndReceive has been called")
+	}
+	return s.trailer
 }
 
 func (s *serverStream) Send(ctx context.Context, req interface{}) error {
@@ -109,10 +163,11 @@ func (s *serverStream) Send(ctx context.Context, req interface{}) error {
 	}
 
 	contentType := "application/grpc-web+" + codec.Name()
-	_, rawBody, err := s.transport.Send(ctx, s.endpoint, contentType, r)
+	header, rawBody, err := s.transport.Send(ctx, s.endpoint, contentType, r)
 	if err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}
+	s.header = toMetadata(header)
 	s.resStream = rawBody
 	return nil
 }
@@ -155,10 +210,12 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 		return nil
 	}
 
-	status, _, err := parser.ParseStatusAndTrailer(s.resStream, length)
+	status, trailer, err := parser.ParseStatusAndTrailer(s.resStream, length)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse trailer")
 	}
+	s.closed = true
+	s.trailer = trailer
 	if status.Code() != codes.OK {
 		return status.Err()
 	}
@@ -166,6 +223,13 @@ func (s *serverStream) Receive(ctx context.Context, res interface{}) (err error)
 }
 
 type BidiStream interface {
+	// Header returns the header metadata from the server, if there is any.
+	// It blocks if the metadata is not ready to read.
+	Header() (metadata.MD, error)
+	// Trailer returns the trailer metadata from the server, if there is any.
+	// It must only be called after stream.CloseAndRecv has returned, or
+	// stream.Recv has returned a non-nil error (including io.EOF).
+	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	Receive(ctx context.Context, res interface{}) error
 	CloseSend() error
@@ -181,27 +245,23 @@ var (
 )
 
 func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
+	if s.closed {
+		return io.EOF
+	}
+
 	rawBody, err := s.transport.Receive(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
 
-	var h [5]byte
-	n, err := rawBody.Read(h[:])
+	resHeader, err := parser.ParseResponseHeader(rawBody)
 	if err != nil {
-		return err
-	}
-	if n != len(h) {
-		return io.ErrUnexpectedEOF
+		return errors.Wrap(err, "failed to parse response header")
 	}
 
-	flag := h[0]
-	length := binary.BigEndian.Uint32(h[1:])
-	if length == 0 {
-		return io.EOF
-	}
-	if flag == 0 || flag == 1 { // Message header.
-		msg, err := parser.ParseLengthPrefixedMessage(rawBody, length)
+	switch {
+	case resHeader.IsMessageHeader():
+		msg, err := parser.ParseLengthPrefixedMessage(rawBody, resHeader.ContentLength)
 		if err != nil {
 			return err
 		}
@@ -209,21 +269,22 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 			return errors.Wrap(err, "failed to unmarshal response body")
 		}
 		return nil
-	}
+	case resHeader.IsTrailerHeader():
+		s.closed = true
 
-	status, _, err := parser.ParseStatusAndTrailer(rawBody, length)
-	if err != nil {
-		return errors.Wrap(err, "failed to parse trailer")
-	}
+		status, trailer, err := parser.ParseStatusAndTrailer(rawBody, resHeader.ContentLength)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse trailer")
+		}
+		s.trailer = trailer
 
-	if err := s.transport.Close(); err != nil {
-		return errors.Wrap(err, "failed to close the gRPC transport")
+		if status.Code() != codes.OK {
+			return status.Err()
+		}
+		return io.EOF
+	default:
+		return errors.New("unexpected header")
 	}
-
-	if status.Code() != codes.OK {
-		return status.Err()
-	}
-	return io.EOF
 }
 
 func (s *bidiStream) CloseSend() error {
