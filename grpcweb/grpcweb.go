@@ -35,7 +35,7 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 	callOptions := c.applyCallOptions(opts)
 	codec := callOptions.codec
 
-	tr := transport.NewUnary(c.host, nil)
+	tr := transport.NewUnary(c.host, callOptions.connection)
 	defer tr.Close()
 
 	r, err := encodeRequestBody(codec, args)

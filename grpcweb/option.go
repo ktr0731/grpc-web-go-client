@@ -1,6 +1,8 @@
 package grpcweb
 
 import (
+	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
+
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/encoding/proto"
@@ -43,6 +45,7 @@ func WithTransportCredentials(creds credentials.TransportCredentials) DialOption
 type callOptions struct {
 	codec           encoding.Codec
 	header, trailer *metadata.MD
+	connection      *transport.ConnectOptions
 }
 
 type CallOption func(*callOptions)
@@ -62,5 +65,11 @@ func Header(h *metadata.MD) CallOption {
 func Trailer(t *metadata.MD) CallOption {
 	return func(opt *callOptions) {
 		opt.trailer = t
+	}
+}
+
+func Transport(connection *transport.ConnectOptions) CallOption {
+	return func(opt *callOptions) {
+		opt.connection = connection
 	}
 }

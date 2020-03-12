@@ -63,9 +63,13 @@ func (t *httpTransport) Close() error {
 }
 
 func NewUnary(host string, opts *ConnectOptions) UnaryTransport {
+	client := http.DefaultClient
+	if opts != nil && opts.Client != nil {
+		client = opts.Client
+	}
 	return &httpTransport{
 		host:   host,
-		client: http.DefaultClient,
+		client: client,
 		opts:   opts,
 	}
 }
