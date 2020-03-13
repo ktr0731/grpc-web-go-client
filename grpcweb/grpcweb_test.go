@@ -2,32 +2,66 @@ package grpcweb
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/ktr0731/grpc-test/api"
+	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
+type unaryTransport struct {
+	h   http.Header
+	r   io.ReadCloser
+	err error
+}
+
+func (t *unaryTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (http.Header, io.ReadCloser, error) {
+	return t.h, t.r, t.err
+}
+
+func (t *unaryTransport) Close() error {
+	return nil
+}
+
 func TestInvoke(t *testing.T) {
+	header := http.Header{
+		"hakase": []string{"shinonome"},
+		"nano":   []string{"shinonome"},
+	}
+
 	cases := map[string]struct {
-		fname           string
-		expectedTrailer metadata.MD
-		expectedContent api.SimpleResponse
-		expectedStatus  *status.Status
-		wantErr         bool
+		transportHeader          http.Header
+		transportContentFileName string
+		expectedHeader           metadata.MD
+		expectedTrailer          metadata.MD
+		expectedContent          api.SimpleResponse
+		expectedStatus           *status.Status
+		wantErr                  bool
 	}{
 		"normal (only response)": {
-			fname:           "response",
+			transportHeader:          header,
+			transportContentFileName: "response",
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
 			expectedContent: api.SimpleResponse{Message: "hello, ktr"},
 			expectedStatus:  status.New(codes.OK, ""),
 		},
 		"normal (trailer and response)": {
-			fname: "trailer_response",
+			transportHeader:          header,
+			transportContentFileName: "trailer_response",
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
 			expectedTrailer: metadata.New(map[string]string{
 				"trailer_key1": "trailer_val1",
 				"trailer_key2": "trailer_val2",
@@ -36,60 +70,78 @@ func TestInvoke(t *testing.T) {
 			expectedStatus:  status.New(codes.OK, ""),
 		},
 		"error (trailer and response)": {
-			fname: "trailer_response_error",
+			transportHeader:          header,
+			transportContentFileName: "trailer_response_error",
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
 			expectedTrailer: metadata.New(map[string]string{
 				"trailer_key1": "trailer_val1",
 				"trailer_key2": "trailer_val2",
 			}),
 			expectedStatus: status.New(codes.Internal, "internal error"),
+			wantErr:        true,
 		},
 	}
 
-	codec := defaultCallOptions.codec
-
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			r, err := os.Open(filepath.Join("testdata", c.fname))
+			r, err := os.Open(filepath.Join("testdata", c.transportContentFileName))
 			if err != nil {
 				t.Fatalf("Open should not return an error, but got '%s'", err)
 			}
 
-			var trailer metadata.MD
+			injectUnaryTransport(t, &unaryTransport{
+				h: c.transportHeader,
+				r: r,
+			})
+
+			var header, trailer metadata.MD
 			client, err := DialContext(":50051")
 			if err != nil {
 				t.Fatalf("DialContext should not return an error, but got '%s'", err)
 			}
 
 			var res api.SimpleResponse
-			client.Invoke(context.Background(), "/service/Method", nil, &res)
-
-			actualStatus, actualTrailer, actualContent, err := parseResponseBody(r)
+			opts := []CallOption{Header(&header), Trailer(&trailer)}
+			req := api.SimpleRequest{Name: "nano"}
+			err = client.Invoke(context.Background(), "/service/Method", &req, &res, opts...)
 			if c.wantErr {
 				if err == nil {
-					t.Errorf("expected an error, but got nil")
+					t.Fatalf("should return an error, but got nil")
 				}
-				return
-			}
-			if err != nil {
+			} else if err != nil {
 				t.Fatalf("should not return an error, but got '%s'", err)
 			}
-			if diff := cmp.Diff(c.expectedTrailer, actualTrailer); diff != "" {
+
+			stat := status.Convert(err)
+
+			if diff := cmp.Diff(c.expectedHeader, header); diff != "" {
 				t.Errorf("-want, +got\n%s", diff)
 			}
-			var res api.SimpleResponse
-			err = codec.Unmarshal(actualContent, &res)
-			if err != nil {
-				t.Fatalf("content should be a proto message, but marshaling failed: %s", err)
+			if diff := cmp.Diff(c.expectedTrailer, trailer); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
 			}
 			if diff := cmp.Diff(c.expectedContent, res); diff != "" {
 				t.Errorf("-want, +got\n%s", diff)
 			}
-			if c.expectedStatus.Code() != actualStatus.Code() {
-				t.Errorf("expected code: %s, but got %s", c.expectedStatus.Code(), actualStatus.Code())
+			if stat.Code() != c.expectedStatus.Code() {
+				t.Errorf("expected status code: %s, but got %s", c.expectedStatus.Code(), stat.Code())
 			}
-			if c.expectedStatus.Message() != actualStatus.Message() {
-				t.Errorf("expected message: %s, but got %s", c.expectedStatus.Message(), actualStatus.Message())
+			if stat.Message() != c.expectedStatus.Message() {
+				t.Errorf("expected status message: %s, but got %s", c.expectedStatus.Message(), stat.Message())
 			}
 		})
+	}
+}
+
+func injectUnaryTransport(t *testing.T, tr transport.UnaryTransport) {
+	old := transport.NewUnary
+	t.Cleanup(func() {
+		transport.NewUnary = old
+	})
+	transport.NewUnary = func(string, *transport.ConnectOptions) transport.UnaryTransport {
+		return tr
 	}
 }

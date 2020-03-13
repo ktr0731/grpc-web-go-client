@@ -62,7 +62,7 @@ func (t *httpTransport) Close() error {
 	return nil
 }
 
-func NewUnary(host string, opts *ConnectOptions) UnaryTransport {
+var NewUnary = func(host string, opts *ConnectOptions) UnaryTransport {
 	return &httpTransport{
 		host:   host,
 		client: http.DefaultClient,

@@ -55,12 +55,14 @@ func ForceCodec(codec encoding.Codec) CallOption {
 
 func Header(h *metadata.MD) CallOption {
 	return func(opt *callOptions) {
+		*h = metadata.New(nil)
 		opt.header = h
 	}
 }
 
 func Trailer(t *metadata.MD) CallOption {
 	return func(opt *callOptions) {
+		*t = metadata.New(nil)
 		opt.trailer = t
 	}
 }
