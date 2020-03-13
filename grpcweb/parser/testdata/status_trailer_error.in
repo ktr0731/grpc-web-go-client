@@ -1,0 +1,4 @@
+grpc-message: internal error
+grpc-status: 13
+trailer_key1: trailer_val1
+trailer_key2: trailer_val2
