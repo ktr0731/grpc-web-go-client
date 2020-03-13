@@ -159,14 +159,6 @@ func encodeRequestBody(codec encoding.Codec, in interface{}) (io.Reader, error) 
 	return buf, nil
 }
 
-func parseLengthPrefixedMessageFromHeader(resBody io.Reader) ([]byte, error) {
-	h, err := parser.ParseResponseHeader(resBody)
-	if err != nil {
-		return nil, err
-	}
-	return parser.ParseLengthPrefixedMessage(resBody, h.ContentLength)
-}
-
 func toMetadata(h http.Header) metadata.MD {
 	if len(h) == 0 {
 		return nil
