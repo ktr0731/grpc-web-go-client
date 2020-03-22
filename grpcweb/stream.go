@@ -20,8 +20,8 @@ type ClientStream interface {
 	// It blocks if the metadata is not ready to read.
 	Header() (metadata.MD, error)
 	// Trailer returns the trailer metadata from the server, if there is any.
-	// It must only be called after stream.CloseAndRecv has returned, or
-	// stream.Recv has returned a non-nil error (including io.EOF).
+	// It must only be called after stream.CloseAndReceive has returned, or
+	// stream.Receive has returned a non-nil error (including io.EOF).
 	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	CloseAndReceive(ctx context.Context, res interface{}) error
@@ -151,8 +151,8 @@ type ServerStream interface {
 	// It blocks if the metadata is not ready to read.
 	Header() (metadata.MD, error)
 	// Trailer returns the trailer metadata from the server, if there is any.
-	// It must only be called after stream.CloseAndRecv has returned, or
-	// stream.Recv has returned a non-nil error (including io.EOF).
+	// It must only be called after stream.CloseAndReceive has returned, or
+	// stream.Receive has returned a non-nil error (including io.EOF).
 	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	Receive(ctx context.Context, res interface{}) error
@@ -252,8 +252,8 @@ type BidiStream interface {
 	// It blocks if the metadata is not ready to read.
 	Header() (metadata.MD, error)
 	// Trailer returns the trailer metadata from the server, if there is any.
-	// It must only be called after stream.CloseAndRecv has returned, or
-	// stream.Recv has returned a non-nil error (including io.EOF).
+	// It must only be called after stream.CloseAndReceive has returned, or
+	// stream.Receive has returned a non-nil error (including io.EOF).
 	Trailer() metadata.MD
 	Send(ctx context.Context, req interface{}) error
 	Receive(ctx context.Context, res interface{}) error
