@@ -47,9 +47,9 @@ type callOptions struct {
 
 type CallOption func(*callOptions)
 
-func ForceCodec(codec encoding.Codec) CallOption {
+func CallContentSubtype(contentSubtype string) CallOption {
 	return func(opt *callOptions) {
-		opt.codec = codec
+		opt.codec = encoding.GetCodec(contentSubtype)
 	}
 }
 

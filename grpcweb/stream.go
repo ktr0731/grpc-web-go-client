@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"sync"
 
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
@@ -11,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type ClientStream interface {
@@ -30,11 +32,15 @@ type clientStream struct {
 	transport   transport.ClientStreamTransport
 	callOptions *callOptions
 
-	closed          bool
-	header, trailer metadata.MD
+	trailersOnly, closed bool
+	header, trailer      metadata.MD
 }
 
 func (s *clientStream) Header() (metadata.MD, error) {
+	if s.trailersOnly {
+		return nil, nil
+	}
+
 	if s.header == nil {
 		md := metadata.New(nil)
 		headers, err := s.transport.Header()
@@ -71,10 +77,45 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err := s.transport.CloseSend(); err != nil {
 		return errors.Wrap(err, "failed to close the send stream")
 	}
+
+	s.closed = true
+
 	rawBody, err := s.transport.Receive(ctx)
+	if errors.Is(err, io.ErrUnexpectedEOF) && s.trailer.Len() == 0 {
+		// Trailers-only responses, no message.
+
+		// Parse headers as trailers.
+		s.trailer, err = s.Header()
+		if err != nil {
+			return errors.Wrap(err, "failed to get header instead of trailer")
+		}
+
+		s.trailersOnly = true
+
+		// Try to extract *status.Status from headers.
+		var (
+			code codes.Code
+			msg  string
+		)
+		msgs, codeStr := s.trailer.Get("grpc-message"), s.trailer.Get("grpc-status")
+		if len(codeStr) == 0 {
+			return status.Error(codes.Unknown, "response closed without grpc-status (headers only)")
+		} else {
+			msg = msgs[0]
+			i, err := strconv.Atoi(codeStr[0])
+			if err != nil {
+				code = codes.Unknown
+				msg = err.Error()
+			} else {
+				code = codes.Code(i)
+			}
+		}
+		return status.Error(code, msg)
+	}
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
+
 	var closeOnce sync.Once
 	defer closeOnce.Do(func() { rawBody.Close() })
 
@@ -116,7 +157,6 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to parse status and trailer")
 	}
-	s.closed = true
 	s.trailer = trailer
 	return status.Err()
 }
@@ -237,6 +277,8 @@ type BidiStream interface {
 
 type bidiStream struct {
 	*clientStream
+
+	sentCloseSend bool
 }
 
 var (
@@ -250,6 +292,39 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 	}
 
 	rawBody, err := s.transport.Receive(ctx)
+	if s.sentCloseSend && errors.Is(err, io.ErrUnexpectedEOF) && s.trailer.Len() == 0 {
+		// Trailers-only responses, no message.
+
+		s.closed = true
+
+		// Parse headers as trailers.
+		s.trailer, err = s.Header()
+		if err != nil {
+			return errors.Wrap(err, "failed to get header instead of trailer")
+		}
+
+		s.trailersOnly = true
+
+		// Try to extract *status.Status from headers.
+		var (
+			code codes.Code
+			msg  string
+		)
+		msgs, codeStr := s.trailer.Get("grpc-message"), s.trailer.Get("grpc-status")
+		if len(codeStr) == 0 {
+			return status.Error(codes.Unknown, "response closed without grpc-status (headers only)")
+		} else {
+			msg = msgs[0]
+			i, err := strconv.Atoi(codeStr[0])
+			if err != nil {
+				code = codes.Unknown
+				msg = err.Error()
+			} else {
+				code = codes.Code(i)
+			}
+		}
+		return status.Error(code, msg)
+	}
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
 	}
@@ -291,5 +366,6 @@ func (s *bidiStream) CloseSend() error {
 	if err := s.transport.CloseSend(); err != nil {
 		return errors.Wrap(err, "failed to close the send stream")
 	}
+	s.sentCloseSend = true
 	return nil
 }

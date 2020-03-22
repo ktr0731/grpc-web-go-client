@@ -195,6 +195,9 @@ func (t *webSocketTransport) Receive(context.Context) (_ io.ReadCloser, err erro
 			if cerr.Code == websocket.CloseNormalClosure {
 				return nil, io.EOF
 			}
+			if cerr.Code == websocket.CloseAbnormalClosure {
+				return nil, io.ErrUnexpectedEOF
+			}
 		}
 		err = errors.Wrap(err, "failed to read response body")
 		return
@@ -243,7 +246,7 @@ func (t *webSocketTransport) writeMessage(msg int, b []byte) error {
 	return t.conn.WriteMessage(msg, b)
 }
 
-func NewClientStream(host, endpoint string) (ClientStreamTransport, error) {
+var NewClientStream = func(host, endpoint string) (ClientStreamTransport, error) {
 	// TODO: WebSocket over TLS support.
 	u := url.URL{Scheme: "ws", Host: host, Path: endpoint}
 	h := http.Header{}

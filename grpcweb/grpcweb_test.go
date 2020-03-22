@@ -278,3 +278,341 @@ func TestServerStream(t *testing.T) {
 		})
 	}
 }
+
+type clientStreamTransport struct {
+	sentCloseSend bool
+
+	h, t http.Header
+	r    []io.ReadCloser
+	err  error
+
+	i int
+}
+
+func (s *clientStreamTransport) Header() (http.Header, error) {
+	return s.h, nil
+}
+
+func (s *clientStreamTransport) Trailer() http.Header {
+	return s.t
+}
+
+func (s *clientStreamTransport) Send(context.Context, io.Reader) error {
+	return nil
+}
+
+func (s *clientStreamTransport) Receive(context.Context) (io.ReadCloser, error) {
+	if s.sentCloseSend && s.err != nil {
+		return nil, s.err
+	}
+	r := s.r[s.i]
+	s.i++
+	return r, nil
+}
+
+func (s *clientStreamTransport) CloseSend() error {
+	s.sentCloseSend = true
+	return nil
+}
+
+func (s *clientStreamTransport) Close() error {
+	return nil
+}
+
+func TestClientStream(t *testing.T) {
+	header := http.Header{
+		"hakase": []string{"shinonome"},
+		"nano":   []string{"shinonome"},
+	}
+
+	cases := map[string]struct {
+		transportHeader           http.Header
+		transportContentFileNames []string
+		transportErr              error
+		expectedHeader            metadata.MD
+		expectedTrailer           metadata.MD
+		expectedContent           api.SimpleResponse
+		expectedStatus            *status.Status
+	}{
+		"normal (only response)": {
+			transportHeader:           header,
+			transportContentFileNames: []string{"client_stream_response1.in", "client_stream_response2.in"},
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
+			expectedContent: api.SimpleResponse{
+				Message: "you sent requests 2 times (hakase, nano).",
+			},
+			expectedStatus: status.New(codes.OK, ""),
+		},
+		"normal (trailer and response)": {
+			transportHeader:           header,
+			transportContentFileNames: []string{"client_stream_trailer_response1.in", "client_stream_trailer_response2.in"},
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
+			expectedTrailer: metadata.New(map[string]string{
+				"trailer_key1": "trailer_val1",
+				"trailer_key2": "trailer_val2",
+			}),
+			expectedContent: api.SimpleResponse{
+				Message: "you sent requests 2 times (hakase, nano).",
+			},
+			expectedStatus: status.New(codes.OK, ""),
+		},
+		"error (only response)": {
+			transportHeader:           header,
+			transportContentFileNames: []string{"client_stream_response_error.in"},
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
+			expectedStatus: status.New(codes.Internal, "internal error"),
+		},
+		"error (trailer only)": {
+			transportHeader: http.Header{
+				"hakase":       []string{"shinonome"},
+				"nano":         []string{"shinonome"},
+				"grpc-status":  []string{"13"},
+				"grpc-message": []string{"internal error"},
+			},
+			transportErr:   io.ErrUnexpectedEOF,
+			expectedHeader: nil,
+			expectedTrailer: metadata.New(map[string]string{
+				"hakase":       "shinonome",
+				"nano":         "shinonome",
+				"grpc-status":  "13",
+				"grpc-message": "internal error",
+			}),
+			expectedStatus: status.New(codes.Internal, "internal error"),
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			var rs []io.ReadCloser
+			for _, fname := range c.transportContentFileNames {
+				r, err := os.Open(filepath.Join("testdata", fname))
+				if err != nil {
+					t.Fatalf("Open should not return an error, but got '%s'", err)
+				}
+				rs = append(rs, r)
+			}
+
+			injectClientStreamTransport(t, &clientStreamTransport{
+				h:   c.transportHeader,
+				r:   rs,
+				err: c.transportErr,
+			})
+
+			client, err := DialContext(":50051")
+			if err != nil {
+				t.Fatalf("DialContext should not return an error, but got '%s'", err)
+			}
+
+			stm, err := client.NewClientStream(&grpc.StreamDesc{ClientStreams: true}, "/service/Method")
+			if err != nil {
+				t.Fatalf("should not return an error, but got '%s'", err)
+			}
+
+			ctx := context.Background()
+			if err := stm.Send(ctx, &api.SimpleRequest{Name: "nano"}); err != nil {
+				t.Fatalf("Send should not return an error, but got '%s'", err)
+			}
+			if err := stm.Send(ctx, &api.SimpleRequest{Name: "hakase"}); err != nil {
+				t.Fatalf("Send should not return an error, but got '%s'", err)
+			}
+
+			var res api.SimpleResponse
+			err = stm.CloseAndReceive(ctx, &res)
+
+			stat := status.Convert(err)
+
+			header, err := stm.Header()
+			if err != nil {
+				t.Fatalf("Header should not return an error, but got '%s'", err)
+			}
+			if diff := cmp.Diff(c.expectedHeader, header); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
+			}
+			if diff := cmp.Diff(c.expectedTrailer, stm.Trailer()); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
+			}
+			if diff := cmp.Diff(c.expectedContent, res); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
+			}
+			if stat.Code() != c.expectedStatus.Code() {
+				t.Errorf("expected status code: %s, but got %s", c.expectedStatus.Code(), stat.Code())
+			}
+			if stat.Message() != c.expectedStatus.Message() {
+				t.Errorf("expected status message: %s, but got %s", c.expectedStatus.Message(), stat.Message())
+			}
+		})
+	}
+}
+
+func TestBidiStream(t *testing.T) {
+	header := http.Header{
+		"hakase": []string{"shinonome"},
+		"nano":   []string{"shinonome"},
+	}
+
+	cases := map[string]struct {
+		transportHeader           http.Header
+		transportContentFileNames []string
+		transportErr              error
+		expectedHeader            metadata.MD
+		expectedTrailer           metadata.MD
+		expectedContent           []api.SimpleResponse
+		expectedStatus            *status.Status
+	}{
+		"normal (only response)": {
+			transportHeader:           header,
+			transportContentFileNames: []string{"bidi_stream_response1.in", "bidi_stream_response2.in", "bidi_stream_response3.in", "bidi_stream_response4.in"},
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
+			expectedContent: []api.SimpleResponse{
+				{Message: "hello ktr, I greet 1 times."},
+				{Message: "hello ktr, I greet 2 times."},
+				{Message: "hello ktr, I greet 3 times."},
+			},
+			expectedStatus: status.New(codes.OK, ""),
+		},
+		"normal (trailer and response)": {
+			transportHeader:           header,
+			transportContentFileNames: []string{"bidi_stream_response1.in", "bidi_stream_response2.in", "bidi_stream_response3.in", "bidi_stream_response1.in", "bidi_stream_response2.in", "bidi_stream_response3.in", "bidi_stream_trailer_response.in"},
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
+			expectedTrailer: metadata.New(map[string]string{
+				"trailer_key1": "trailer_val1",
+				"trailer_key2": "trailer_val2",
+			}),
+			expectedContent: []api.SimpleResponse{
+				{Message: "hello ktr, I greet 1 times."},
+				{Message: "hello ktr, I greet 2 times."},
+				{Message: "hello ktr, I greet 3 times."},
+				{Message: "hello ktr, I greet 1 times."},
+				{Message: "hello ktr, I greet 2 times."},
+				{Message: "hello ktr, I greet 3 times."},
+			},
+			expectedStatus: status.New(codes.OK, ""),
+		},
+		"error (only response)": {
+			transportHeader:           header,
+			transportContentFileNames: []string{"bidi_stream_response_error.in"},
+			expectedHeader: metadata.New(map[string]string{
+				"hakase": "shinonome",
+				"nano":   "shinonome",
+			}),
+			expectedStatus: status.New(codes.Internal, "internal error"),
+		},
+		"error (trailer only)": {
+			transportHeader: http.Header{
+				"hakase":       []string{"shinonome"},
+				"nano":         []string{"shinonome"},
+				"grpc-status":  []string{"13"},
+				"grpc-message": []string{"internal error"},
+			},
+			transportErr:   io.ErrUnexpectedEOF,
+			expectedHeader: nil,
+			expectedTrailer: metadata.New(map[string]string{
+				"hakase":       "shinonome",
+				"nano":         "shinonome",
+				"grpc-status":  "13",
+				"grpc-message": "internal error",
+			}),
+			expectedStatus: status.New(codes.Internal, "internal error"),
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			var rs []io.ReadCloser
+			for _, fname := range c.transportContentFileNames {
+				r, err := os.Open(filepath.Join("testdata", fname))
+				if err != nil {
+					t.Fatalf("Open should not return an error, but got '%s'", err)
+				}
+				rs = append(rs, r)
+			}
+
+			injectClientStreamTransport(t, &clientStreamTransport{
+				h:   c.transportHeader,
+				r:   rs,
+				err: c.transportErr,
+			})
+
+			client, err := DialContext(":50051")
+			if err != nil {
+				t.Fatalf("DialContext should not return an error, but got '%s'", err)
+			}
+
+			stm, err := client.NewBidiStream(&grpc.StreamDesc{ClientStreams: true, ServerStreams: true}, "/service/Method")
+			if err != nil {
+				t.Fatalf("should not return an error, but got '%s'", err)
+			}
+
+			ctx := context.Background()
+			if err := stm.Send(ctx, &api.SimpleRequest{Name: "nano"}); err != nil {
+				t.Fatalf("Send should not return an error, but got '%s'", err)
+			}
+			if err := stm.Send(ctx, &api.SimpleRequest{Name: "hakase"}); err != nil {
+				t.Fatalf("Send should not return an error, but got '%s'", err)
+			}
+			err = stm.CloseSend()
+
+			var ress []api.SimpleResponse
+			for {
+				var res api.SimpleResponse
+				err = stm.Receive(ctx, &res) // Don't create scoped error
+				if errors.Is(err, io.EOF) {
+					err = nil
+					break
+				}
+				if err != nil {
+					t.Logf("Receive returns an error: %s", err)
+					break
+				}
+				ress = append(ress, res)
+			}
+
+			stat := status.Convert(err)
+
+			header, err := stm.Header()
+			if err != nil {
+				t.Fatalf("Header should not return an error, but got '%s'", err)
+			}
+			if diff := cmp.Diff(c.expectedHeader, header); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
+			}
+			if diff := cmp.Diff(c.expectedTrailer, stm.Trailer()); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
+			}
+			if diff := cmp.Diff(c.expectedContent, ress); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
+			}
+			if stat.Code() != c.expectedStatus.Code() {
+				t.Errorf("expected status code: %s, but got %s", c.expectedStatus.Code(), stat.Code())
+			}
+			if stat.Message() != c.expectedStatus.Message() {
+				t.Errorf("expected status message: %s, but got %s", c.expectedStatus.Message(), stat.Message())
+			}
+		})
+	}
+}
+
+func injectClientStreamTransport(t *testing.T, tr transport.ClientStreamTransport) {
+	old := transport.NewClientStream
+	t.Cleanup(func() {
+		transport.NewClientStream = old
+	})
+	transport.NewClientStream = func(string, string) (transport.ClientStreamTransport, error) {
+		return tr, nil
+	}
+}
