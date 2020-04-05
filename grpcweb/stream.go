@@ -10,6 +10,7 @@ import (
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
+	"go.uber.org/atomic"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -32,34 +33,52 @@ type clientStream struct {
 	transport   transport.ClientStreamTransport
 	callOptions *callOptions
 
-	trailersOnly, closed bool
-	header, trailer      metadata.MD
+	trailersOnly, closed atomic.Bool
+	headerMu, trailerMu  sync.RWMutex
+	headerMD, trailerMD  metadata.MD
 }
 
 func (s *clientStream) Header() (metadata.MD, error) {
-	if s.trailersOnly {
+	if s.trailersOnly.Load() {
 		return nil, nil
 	}
 
-	if s.header == nil {
-		md := metadata.New(nil)
-		headers, err := s.transport.Header()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get headers")
-		}
-		for k, v := range headers {
-			md.Append(k, v...)
-		}
-		s.header = md
+	h := s.header()
+	if h != nil {
+		return h, nil
 	}
-	return s.header, nil
+
+	md := metadata.New(nil)
+	headers, err := s.transport.Header()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get headers")
+	}
+	for k, v := range headers {
+		md.Append(k, v...)
+	}
+	s.headerMu.Lock()
+	s.headerMD = md
+	s.headerMu.Unlock()
+	return md, nil
+}
+
+func (s *clientStream) header() metadata.MD {
+	s.headerMu.RLock()
+	defer s.headerMu.RUnlock()
+	return s.headerMD
 }
 
 func (s *clientStream) Trailer() metadata.MD {
-	if !s.closed {
+	if !s.closed.Load() {
 		panic("Trailer must be called after stream.CloseAndReceive has been called")
 	}
-	return s.trailer
+	return s.trailer()
+}
+
+func (s *clientStream) trailer() metadata.MD {
+	s.trailerMu.RLock()
+	defer s.trailerMu.RUnlock()
+	return s.trailerMD
 }
 
 func (s *clientStream) Send(ctx context.Context, req interface{}) error {
@@ -78,20 +97,22 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 		return errors.Wrap(err, "failed to close the send stream")
 	}
 
-	s.closed = true
+	s.closed.Store(true)
 
 	rawBody, err := s.transport.Receive(ctx)
 	if s.isTrailerOnly(err) {
 		// Parse headers as trailers.
-		s.trailer, err = s.Header()
+		trailer, err := s.Header()
 		if err != nil {
 			return errors.Wrap(err, "failed to get header instead of trailer")
 		}
-
-		s.trailersOnly = true
+		s.trailerMu.Lock()
+		s.trailerMD = trailer
+		s.trailersOnly.Store(true)
+		s.trailerMu.Unlock()
 
 		// Try to extract *status.Status from headers.
-		return statusFromHeader(s.trailer).Err()
+		return statusFromHeader(trailer).Err()
 	}
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
@@ -138,12 +159,14 @@ func (s *clientStream) CloseAndReceive(ctx context.Context, res interface{}) err
 	if err != nil {
 		return errors.Wrap(err, "failed to parse status and trailer")
 	}
-	s.trailer = trailer
+	s.trailerMu.Lock()
+	defer s.trailerMu.Unlock()
+	s.trailerMD = trailer
 	return status.Err()
 }
 
 func (s *clientStream) isTrailerOnly(err error) bool {
-	return errors.Is(err, io.ErrUnexpectedEOF) && s.trailer.Len() == 0
+	return errors.Is(err, io.ErrUnexpectedEOF) && s.trailer().Len() == 0
 }
 
 type ServerStream interface {
@@ -263,7 +286,7 @@ type BidiStream interface {
 type bidiStream struct {
 	*clientStream
 
-	sentCloseSend bool
+	sentCloseSend atomic.Bool
 }
 
 var (
@@ -272,7 +295,7 @@ var (
 )
 
 func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
-	if s.closed {
+	if s.closed.Load() {
 		return io.EOF
 	}
 
@@ -280,18 +303,21 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 	if s.isTrailerOnly(err) {
 		// Trailers-only responses, no message.
 
-		s.closed = true
+		s.closed.Store(true)
 
 		// Parse headers as trailers.
-		s.trailer, err = s.Header()
+		trailer, err := s.Header()
 		if err != nil {
 			return errors.Wrap(err, "failed to get header instead of trailer")
 		}
 
-		s.trailersOnly = true
+		s.trailerMu.Lock()
+		s.trailerMD = trailer
+		s.trailersOnly.Store(true)
+		s.trailerMu.Unlock()
 
 		// Try to extract *status.Status from headers.
-		return statusFromHeader(s.trailer).Err()
+		return statusFromHeader(trailer).Err()
 	}
 	if err != nil {
 		return errors.Wrap(err, "failed to receive the response")
@@ -313,13 +339,15 @@ func (s *bidiStream) Receive(ctx context.Context, res interface{}) error {
 		}
 		return nil
 	case resHeader.IsTrailerHeader():
-		s.closed = true
+		s.closed.Store(true)
 
 		status, trailer, err := parser.ParseStatusAndTrailer(rawBody, resHeader.ContentLength)
 		if err != nil {
 			return errors.Wrap(err, "failed to parse trailer")
 		}
-		s.trailer = trailer
+		s.trailerMu.Lock()
+		s.trailerMD = trailer
+		s.trailerMu.Unlock()
 
 		if status.Code() != codes.OK {
 			return status.Err()
@@ -334,12 +362,12 @@ func (s *bidiStream) CloseSend() error {
 	if err := s.transport.CloseSend(); err != nil {
 		return errors.Wrap(err, "failed to close the send stream")
 	}
-	s.sentCloseSend = true
+	s.sentCloseSend.Store(true)
 	return nil
 }
 
 func (s *bidiStream) isTrailerOnly(err error) bool {
-	return s.sentCloseSend && s.clientStream.isTrailerOnly(err)
+	return s.sentCloseSend.Load() && s.clientStream.isTrailerOnly(err)
 }
 
 func statusFromHeader(h metadata.MD) *status.Status {
