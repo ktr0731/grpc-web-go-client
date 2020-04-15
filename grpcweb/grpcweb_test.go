@@ -19,12 +19,26 @@ import (
 )
 
 type unaryTransport struct {
-	h   http.Header
-	r   io.ReadCloser
-	err error
+	t *testing.T
+
+	expectedMD metadata.MD
+	h          http.Header
+	r          io.ReadCloser
+	err        error
+}
+
+func (t *unaryTransport) Header() http.Header {
+	return make(http.Header)
 }
 
 func (t *unaryTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (http.Header, io.ReadCloser, error) {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		t.t.Fatalf("outgoing ctx should have metadata")
+	}
+	if diff := cmp.Diff(t.expectedMD, md); diff != "" {
+		t.t.Fatalf("-want, +got\n%s", diff)
+	}
 	return t.h, t.r, t.err
 }
 
@@ -94,9 +108,13 @@ func TestInvoke(t *testing.T) {
 				t.Fatalf("Open should not return an error, but got '%s'", err)
 			}
 
+			md := metadata.Pairs("yuko", "aioi")
+
 			injectUnaryTransport(t, &unaryTransport{
-				h: c.transportHeader,
-				r: r,
+				t:          t,
+				expectedMD: md,
+				h:          c.transportHeader,
+				r:          r,
 			})
 
 			var header, trailer metadata.MD
@@ -108,7 +126,8 @@ func TestInvoke(t *testing.T) {
 			var res api.SimpleResponse
 			opts := []CallOption{Header(&header), Trailer(&trailer)}
 			req := api.SimpleRequest{Name: "nano"}
-			err = client.Invoke(context.Background(), "/service/Method", &req, &res, opts...)
+			ctx := metadata.NewOutgoingContext(context.Background(), md)
+			err = client.Invoke(ctx, "/service/Method", &req, &res, opts...)
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("should return an error, but got nil")
@@ -219,9 +238,13 @@ func TestServerStream(t *testing.T) {
 				t.Fatalf("Open should not return an error, but got '%s'", err)
 			}
 
+			md := metadata.Pairs("yuko", "aioi")
+
 			injectUnaryTransport(t, &unaryTransport{
-				h: c.transportHeader,
-				r: r,
+				t:          t,
+				expectedMD: md,
+				h:          c.transportHeader,
+				r:          r,
 			})
 
 			client, err := DialContext(":50051")
@@ -234,7 +257,7 @@ func TestServerStream(t *testing.T) {
 				t.Fatalf("should not return an error, but got '%s'", err)
 			}
 
-			ctx := context.Background()
+			ctx := metadata.NewOutgoingContext(context.Background(), md)
 			if err := stm.Send(ctx, &api.SimpleRequest{Name: "nano"}); err != nil {
 				t.Fatalf("Send should not return an error, but got '%s'", err)
 			}
@@ -280,6 +303,9 @@ func TestServerStream(t *testing.T) {
 }
 
 type clientStreamTransport struct {
+	tt             *testing.T
+	expectedHeader http.Header
+
 	sentCloseSend bool
 
 	h, t http.Header
@@ -287,6 +313,12 @@ type clientStreamTransport struct {
 	err  error
 
 	i int
+}
+
+func (s *clientStreamTransport) SetRequestHeader(h http.Header) {
+	if diff := cmp.Diff(s.expectedHeader, h); diff != "" {
+		s.tt.Fatalf("-want, +got\n%s", diff)
+	}
 }
 
 func (s *clientStreamTransport) Header() (http.Header, error) {
@@ -401,10 +433,14 @@ func TestClientStream(t *testing.T) {
 				rs = append(rs, r)
 			}
 
+			h := make(http.Header)
+			h.Add("yuko", "aioi")
 			injectClientStreamTransport(t, &clientStreamTransport{
-				h:   c.transportHeader,
-				r:   rs,
-				err: c.transportErr,
+				tt:             t,
+				expectedHeader: h,
+				h:              c.transportHeader,
+				r:              rs,
+				err:            c.transportErr,
 			})
 
 			client, err := DialContext(":50051")
@@ -417,7 +453,7 @@ func TestClientStream(t *testing.T) {
 				t.Fatalf("should not return an error, but got '%s'", err)
 			}
 
-			ctx := context.Background()
+			ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("yuko", "aioi"))
 			if err := stm.Send(ctx, &api.SimpleRequest{Name: "nano"}); err != nil {
 				t.Fatalf("Send should not return an error, but got '%s'", err)
 			}
@@ -542,10 +578,14 @@ func TestBidiStream(t *testing.T) {
 				rs = append(rs, r)
 			}
 
+			h := make(http.Header)
+			h.Add("yuko", "aioi")
 			injectClientStreamTransport(t, &clientStreamTransport{
-				h:   c.transportHeader,
-				r:   rs,
-				err: c.transportErr,
+				tt:             t,
+				expectedHeader: h,
+				h:              c.transportHeader,
+				r:              rs,
+				err:            c.transportErr,
 			})
 
 			client, err := DialContext(":50051")
@@ -558,7 +598,7 @@ func TestBidiStream(t *testing.T) {
 				t.Fatalf("should not return an error, but got '%s'", err)
 			}
 
-			ctx := context.Background()
+			ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("yuko", "aioi"))
 			if err := stm.Send(ctx, &api.SimpleRequest{Name: "nano"}); err != nil {
 				t.Fatalf("Send should not return an error, but got '%s'", err)
 			}
