@@ -17,6 +17,7 @@ import (
 )
 
 type UnaryTransport interface {
+	Header() http.Header
 	Send(ctx context.Context, endpoint, contentType string, body io.Reader) (http.Header, io.ReadCloser, error)
 	Close() error
 }
@@ -26,7 +27,13 @@ type httpTransport struct {
 	client *http.Client
 	opts   *ConnectOptions
 
+	header http.Header
+
 	sent bool
+}
+
+func (t *httpTransport) Header() http.Header {
+	return t.header
 }
 
 func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, body io.Reader) (http.Header, io.ReadCloser, error) {
@@ -46,6 +53,7 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 		return nil, nil, errors.Wrap(err, "failed to build the API request")
 	}
 
+	req.Header = t.Header()
 	req.Header.Add("content-type", contentType)
 	req.Header.Add("x-grpc-web", "1")
 
@@ -67,6 +75,7 @@ var NewUnary = func(host string, opts *ConnectOptions) UnaryTransport {
 		host:   host,
 		client: http.DefaultClient,
 		opts:   opts,
+		header: make(http.Header),
 	}
 }
 

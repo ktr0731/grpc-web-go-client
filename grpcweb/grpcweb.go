@@ -43,6 +43,15 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 		return errors.Wrap(err, "failed to build the request body")
 	}
 
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if ok {
+		for k, v := range md {
+			for _, vv := range v {
+				tr.Header().Add(k, vv)
+			}
+		}
+	}
+
 	contentType := "application/grpc-web+" + codec.Name()
 	header, rawBody, err := tr.Send(ctx, method, contentType, r)
 	if err != nil {
