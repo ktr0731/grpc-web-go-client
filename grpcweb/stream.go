@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"net/http"
 	"strconv"
 	"sync"
 
@@ -86,6 +87,18 @@ func (s *clientStream) Send(ctx context.Context, req interface{}) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to build the request")
 	}
+
+	h := make(http.Header)
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if ok {
+		for k, v := range md {
+			for _, vv := range v {
+				h.Add(k, vv)
+			}
+		}
+	}
+	s.transport.SetRequestHeader(h)
+
 	if err := s.transport.Send(ctx, r); err != nil {
 		return errors.Wrap(err, "failed to send the request")
 	}

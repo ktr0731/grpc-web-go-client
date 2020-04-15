@@ -83,6 +83,9 @@ type ClientStreamTransport interface {
 	Header() (http.Header, error)
 	Trailer() http.Header
 
+	// SetRequestHeader sets headers to send gRPC-Web server.
+	// It should be called before calling Send.
+	SetRequestHeader(h http.Header)
 	Send(ctx context.Context, body io.Reader) error
 	Receive(ctx context.Context) (io.ReadCloser, error)
 
@@ -112,7 +115,7 @@ type webSocketTransport struct {
 
 	writeMu sync.Mutex
 
-	header, trailer http.Header
+	reqHeader, header, trailer http.Header
 }
 
 func (t *webSocketTransport) Header() (http.Header, error) {
@@ -123,6 +126,10 @@ func (t *webSocketTransport) Trailer() http.Header {
 	return t.trailer
 }
 
+func (t *webSocketTransport) SetRequestHeader(h http.Header) {
+	t.reqHeader = h
+}
+
 func (t *webSocketTransport) Send(ctx context.Context, body io.Reader) error {
 	if t.closed {
 		return io.EOF
@@ -130,7 +137,10 @@ func (t *webSocketTransport) Send(ctx context.Context, body io.Reader) error {
 
 	var err error
 	t.once.Do(func() {
-		h := http.Header{}
+		h := t.reqHeader
+		if h == nil {
+			h = make(http.Header)
+		}
 		h.Set("content-type", "application/grpc-web+proto")
 		h.Set("x-grpc-web", "1")
 		var b bytes.Buffer
