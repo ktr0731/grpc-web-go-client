@@ -10,9 +10,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
 	"github.com/pkg/errors"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/testing/protocmp"
 )
 
 func TestParseResponseHeader(t *testing.T) {
@@ -147,6 +149,38 @@ func TestParseStatusAndTrailer(t *testing.T) {
 				"trailer_key2": "trailer_val2",
 			}),
 		},
+		"ok with grpc-status-details-bin": {
+			fname: "status_grpc_status_details_bin.in",
+			expectedStatus: func() *status.Status {
+				s, err := status.New(codes.Internal, "internal error").WithDetails(
+					&errdetails.BadRequest{
+						FieldViolations: []*errdetails.BadRequest_FieldViolation{
+							&errdetails.BadRequest_FieldViolation{
+								Field:       "field",
+								Description: "description",
+							},
+						},
+					},
+					&errdetails.PreconditionFailure{
+						Violations: []*errdetails.PreconditionFailure_Violation{
+							&errdetails.PreconditionFailure_Violation{
+								Type:        "type",
+								Subject:     "subject",
+								Description: "description",
+							},
+						},
+					},
+				)
+				if err != nil {
+					t.Fatalf("WithDetails should not return an error, but got '%s'", err)
+				}
+				return s
+			}(),
+			expectedTrailer: metadata.New(map[string]string{
+				"trailer_key1": "trailer_val1",
+				"trailer_key2": "trailer_val2",
+			}),
+		},
 		"bytes exceeds length": {
 			fname:       "status_trailer.in",
 			length:      3,
@@ -186,11 +220,8 @@ func TestParseStatusAndTrailer(t *testing.T) {
 					return
 				}
 			}
-			if status.Code() != c.expectedStatus.Code() {
-				t.Errorf("expected status code: %s, but got %s", c.expectedStatus.Code(), status.Code())
-			}
-			if status.Message() != c.expectedStatus.Message() {
-				t.Errorf("expected status message: %s, but got %s", c.expectedStatus.Message(), status.Message())
+			if diff := cmp.Diff(c.expectedStatus.Proto(), status.Proto(), protocmp.Transform()); diff != "" {
+				t.Errorf("-want, +got\n%s", diff)
 			}
 			if diff := cmp.Diff(c.expectedTrailer, trailer); diff != "" {
 				t.Errorf("-want, +got\n%s", diff)

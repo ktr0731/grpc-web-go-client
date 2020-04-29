@@ -1,0 +1,5 @@
+grpc-message: internal error
+grpc-status: 13
+trailer_key1: trailer_val1
+trailer_key2: trailer_val2
+grpc-status-details-bin: CA0SDmludGVybmFsIGVycm9yGkMKKXR5cGUuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLnJwYy5CYWRSZXF1ZXN0EhYKFAoFZmllbGQSC2Rlc2NyaXB0aW9uGlQKMnR5cGUuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLnJwYy5QcmVjb25kaXRpb25GYWlsdXJlEh4KHAoEdHlwZRIHc3ViamVjdBoLZGVzY3JpcHRpb24
