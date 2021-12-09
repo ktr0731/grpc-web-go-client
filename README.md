@@ -1,6 +1,6 @@
 # gRPC Web Go client
-[![GoDoc](https://godoc.org/github.com/ktr0731/grpc-web-go-client/grpcweb?status.svg)](https://godoc.org/github.com/ktr0731/grpc-web-go-client/grpcweb)
-[![GitHub Actions](https://github.com/ktr0731/grpc-web-go-client/workflows/main/badge.svg)](https://github.com/ktr0731/grpc-web-go-client/actions)  
+[![GoDoc](https://godoc.org/github.com/duongcongtoaimanabie/grpc-web-go-client/grpcweb?status.svg)](https://godoc.org/github.com/duongcongtoaimanabie/grpc-web-go-client/grpcweb)
+[![GitHub Actions](https://github.com/duongcongtoaimanabie/grpc-web-go-client/workflows/main/badge.svg)](https://github.com/duongcongtoaimanabie/grpc-web-go-client/actions)  
 
 *THE IMPLEMENTATION IS LACKING*
 
@@ -8,7 +8,7 @@ gRPC Web client written in Go.
 
 
 ## Usage
-The server is [here](github.com/ktr0731/grpc-test).  
+The server is [here](github.com/duongcongtoaimanabie/grpc-test).  
 
 Send an unary request.
 

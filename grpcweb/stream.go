@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
-	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
+	"github.com/duongcongtoaimanabie/grpc-web-go-client/grpcweb/parser"
+	"github.com/duongcongtoaimanabie/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/codes"

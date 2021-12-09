@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/ktr0731/grpc-web-go-client/grpcweb/parser"
-	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
+	"github.com/duongcongtoaimanabie/grpc-web-go-client/grpcweb/parser"
+	"github.com/duongcongtoaimanabie/grpc-web-go-client/grpcweb/transport"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
