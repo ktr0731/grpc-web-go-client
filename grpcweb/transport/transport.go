@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"io/ioutil"
 	"net"
@@ -45,7 +46,7 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 	}()
 
 	// TODO: HTTPS support.
-	scheme := "http"
+	scheme := "https"
 	u := url.URL{Scheme: scheme, Host: t.host, Path: endpoint}
 	url := u.String()
 	req, err := http.NewRequest(http.MethodPost, url, body)
@@ -71,6 +72,8 @@ func (t *httpTransport) Close() error {
 }
 
 var NewUnary = func(host string, opts *ConnectOptions) UnaryTransport {
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
 	return &httpTransport{
 		host:   host,
 		client: http.DefaultClient,
