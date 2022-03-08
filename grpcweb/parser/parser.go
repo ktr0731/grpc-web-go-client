@@ -79,13 +79,13 @@ func ParseStatusAndTrailer(r io.Reader, length uint32) (*status.Status, metadata
 		}
 
 		t := s.Text()
-		i := strings.Index(t, ": ")
+		i := strings.Index(t, ":")
 		if i == -1 {
 			return nil, nil, io.ErrUnexpectedEOF
 		}
 
 		// Check reserved keys.
-		k, v := strings.ToLower(t[:i]), t[i+2:]
+		k, v := strings.ToLower(t[:i]), strings.TrimSpace(t[i+1:])
 		switch k {
 		case "grpc-status":
 			n, err := strconv.ParseUint(v, 10, 32)
@@ -119,7 +119,7 @@ func ParseStatusAndTrailer(r io.Reader, length uint32) (*status.Status, metadata
 			}
 			headerStat = status.FromProto(s)
 		default:
-			trailer.Append(k, t[i+2:])
+			trailer.Append(k, v)
 		}
 	}
 
