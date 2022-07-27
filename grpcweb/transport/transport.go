@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"io/ioutil"
 	"net"
@@ -23,6 +25,7 @@ type UnaryTransport interface {
 }
 
 type httpTransport struct {
+	scheme string
 	host   string
 	client *http.Client
 	opts   *ConnectOptions
@@ -44,9 +47,7 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 		t.sent = true
 	}()
 
-	// TODO: HTTPS support.
-	scheme := "http"
-	u := url.URL{Scheme: scheme, Host: t.host, Path: endpoint}
+	u := url.URL{Scheme: t.scheme, Host: t.host, Path: endpoint}
 	url := u.String()
 	req, err := http.NewRequest(http.MethodPost, url, body)
 	if err != nil {
@@ -70,13 +71,31 @@ func (t *httpTransport) Close() error {
 	return nil
 }
 
-var NewUnary = func(host string, opts *ConnectOptions) UnaryTransport {
+var NewUnary = func(host string, opts *ConnectOptions) (UnaryTransport, error) {
+	var httpClient *http.Client
+	scheme := "http"
+	if opts != nil && opts.TlsOptions != nil {
+		tlsConfig, err := buildTLSConfig(opts.TlsOptions)
+		if err != nil {
+			return nil, err
+		}
+		transport := http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
+		httpClient = &http.Client{
+			Transport: &transport,
+		}
+		scheme = "https"
+	} else {
+		httpClient = http.DefaultClient
+	}
 	return &httpTransport{
+		scheme: scheme,
 		host:   host,
-		client: http.DefaultClient,
+		client: httpClient,
 		opts:   opts,
 		header: make(http.Header),
-	}
+	}, nil
 }
 
 type ClientStreamTransport interface {
@@ -265,13 +284,22 @@ func (t *webSocketTransport) writeMessage(msg int, b []byte) error {
 	return t.conn.WriteMessage(msg, b)
 }
 
-var NewClientStream = func(host, endpoint string) (ClientStreamTransport, error) {
-	// TODO: WebSocket over TLS support.
-	u := url.URL{Scheme: "ws", Host: host, Path: endpoint}
+var NewClientStream = func(host, endpoint string, opts *ConnectOptions) (ClientStreamTransport, error) {
+	scheme := "ws"
+	var conn *websocket.Conn
+	dialer := websocket.DefaultDialer
+	if opts != nil && opts.TlsOptions != nil {
+		tlsConfig, err := buildTLSConfig(opts.TlsOptions)
+		if err != nil {
+			return nil, err
+		}
+		dialer.TLSClientConfig = tlsConfig
+		scheme = "wss"
+	}
+	u := url.URL{Scheme: scheme, Host: host, Path: endpoint}
 	h := http.Header{}
 	h.Set("Sec-WebSocket-Protocol", "grpc-websockets")
-	var conn *websocket.Conn
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), h)
+	conn, _, err := dialer.Dial(u.String(), h)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to dial to '%s'", u.String())
 	}
@@ -281,4 +309,25 @@ var NewClientStream = func(host, endpoint string) (ClientStreamTransport, error)
 		endpoint: endpoint,
 		conn:     conn,
 	}, nil
+}
+
+func buildTLSConfig(tlsOptions *TLSOptions) (*tls.Config, error) {
+	config := tls.Config{}
+
+	//check if we need mTLS here
+	if len(tlsOptions.PemClientKey) > 0 && len(tlsOptions.PemClientCertificate) > 0 {
+		clientCert, err := tls.X509KeyPair(tlsOptions.PemClientCertificate, tlsOptions.PemClientKey)
+		if err != nil {
+			return nil, err
+		}
+		config.Certificates = []tls.Certificate{clientCert}
+	}
+	certificatePool := x509.NewCertPool()
+	for _, caCert := range tlsOptions.RootCertificates {
+		if ok := certificatePool.AppendCertsFromPEM(caCert); !ok {
+			return nil, errors.New("unable to append root certificate for tls context")
+		}
+	}
+	config.RootCAs = certificatePool
+	return &config, nil
 }
