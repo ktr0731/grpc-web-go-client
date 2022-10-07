@@ -33,9 +33,13 @@ func DialContext(host string, opts ...DialOption) (*ClientConn, error) {
 
 func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply interface{}, opts ...CallOption) error {
 	callOptions := c.applyCallOptions(opts)
+	connectOptions := callOptions.transportConnectOptions
 	codec := callOptions.codec
 
-	tr := transport.NewUnary(c.host, nil)
+	tr, err := transport.NewUnary(c.host, connectOptions)
+	if err != nil {
+		return err
+	}
 	defer tr.Close()
 
 	r, err := encodeRequestBody(codec, args)
@@ -101,7 +105,9 @@ func (c *ClientConn) NewClientStream(desc *grpc.StreamDesc, method string, opts 
 	if !desc.ClientStreams {
 		return nil, errors.New("not a client stream RPC")
 	}
-	tr, err := transport.NewClientStream(c.host, method)
+	callOptions := c.applyCallOptions(opts)
+	connectOptions := callOptions.transportConnectOptions
+	tr, err := transport.NewClientStream(c.host, method, connectOptions)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create a new transport stream")
 	}
@@ -116,9 +122,13 @@ func (c *ClientConn) NewServerStream(desc *grpc.StreamDesc, method string, opts 
 	if !desc.ServerStreams {
 		return nil, errors.New("not a server stream RPC")
 	}
+	transport, err := transport.NewUnary(c.host, nil)
+	if err != nil {
+		return nil, err
+	}
 	return &serverStream{
 		endpoint:    method,
-		transport:   transport.NewUnary(c.host, nil),
+		transport:   transport,
 		callOptions: c.applyCallOptions(opts),
 	}, nil
 }

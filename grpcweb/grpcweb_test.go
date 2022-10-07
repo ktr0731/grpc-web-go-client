@@ -162,8 +162,8 @@ func injectUnaryTransport(t *testing.T, tr transport.UnaryTransport) {
 	t.Cleanup(func() {
 		transport.NewUnary = old
 	})
-	transport.NewUnary = func(string, *transport.ConnectOptions) transport.UnaryTransport {
-		return tr
+	transport.NewUnary = func(string, *transport.ConnectOptions) (transport.UnaryTransport, error) {
+		return tr, nil
 	}
 }
 
@@ -652,7 +652,7 @@ func injectClientStreamTransport(t *testing.T, tr transport.ClientStreamTranspor
 	t.Cleanup(func() {
 		transport.NewClientStream = old
 	})
-	transport.NewClientStream = func(string, string) (transport.ClientStreamTransport, error) {
+	transport.NewClientStream = func(string, string, *transport.ConnectOptions) (transport.ClientStreamTransport, error) {
 		return tr, nil
 	}
 }
