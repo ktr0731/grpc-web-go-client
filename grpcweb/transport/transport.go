@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -60,6 +61,10 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 	res, err := t.client.Do(req)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to send the API")
+	}
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, nil, fmt.Errorf("%s %s", res.Proto, res.Status)
 	}
 
 	return res.Header, res.Body, nil

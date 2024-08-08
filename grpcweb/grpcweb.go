@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -58,6 +59,14 @@ func (c *ClientConn) Invoke(ctx context.Context, method string, args, reply inte
 		return errors.Wrap(err, "failed to send the request")
 	}
 	defer rawBody.Close()
+
+	if status := header.Get("grpc-status"); status != "" && status != "0" {
+		return fmt.Errorf("GRPC status %s: %s", status, header.Get("grpc-message"))
+	}
+
+	if contentType := header.Get("content-type"); contentType != "application/grpc-web+"+codec.Name() {
+		return fmt.Errorf("unexpected content type %q", contentType)
+	}
 
 	if callOptions.header != nil {
 		*callOptions.header = toMetadata(header)
