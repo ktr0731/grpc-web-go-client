@@ -40,9 +40,6 @@ func ParseResponseHeader(r io.Reader) (*Header, error) {
 	}
 
 	length := binary.BigEndian.Uint32(h[1:])
-	if length == 0 {
-		return nil, io.EOF
-	}
 	return &Header{
 		flag:          h[0],
 		ContentLength: length,
