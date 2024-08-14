@@ -1,6 +1,7 @@
 package grpcweb
 
 import (
+	"github.com/ktr0731/grpc-web-go-client/grpcweb/transport"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/encoding/proto"
@@ -41,8 +42,9 @@ func WithTransportCredentials(creds credentials.TransportCredentials) DialOption
 }
 
 type callOptions struct {
-	codec           encoding.Codec
-	header, trailer *metadata.MD
+	codec                   encoding.Codec
+	header, trailer         *metadata.MD
+	transportConnectOptions *transport.ConnectOptions
 }
 
 type CallOption func(*callOptions)
@@ -50,6 +52,38 @@ type CallOption func(*callOptions)
 func CallContentSubtype(contentSubtype string) CallOption {
 	return func(opt *callOptions) {
 		opt.codec = encoding.GetCodec(contentSubtype)
+	}
+}
+
+func WithTls(trustCertificates [][]byte) CallOption {
+	return func(opt *callOptions) {
+		tlsOptions := transport.TLSOptions{
+			RootCertificates: trustCertificates,
+		}
+		if opt.transportConnectOptions == nil {
+			opt.transportConnectOptions = &transport.ConnectOptions{
+				TlsOptions: &tlsOptions,
+			}
+		} else {
+			opt.transportConnectOptions.TlsOptions = &tlsOptions
+		}
+	}
+}
+
+func WithMtls(clientKey []byte, clientCertificate []byte, trustCertificates [][]byte) CallOption {
+	return func(opt *callOptions) {
+		tlsOptions := transport.TLSOptions{
+			PemClientKey:         clientKey,
+			PemClientCertificate: clientCertificate,
+			RootCertificates:     trustCertificates,
+		}
+		if opt.transportConnectOptions == nil {
+			opt.transportConnectOptions = &transport.ConnectOptions{
+				TlsOptions: &tlsOptions,
+			}
+		} else {
+			opt.transportConnectOptions.TlsOptions = &tlsOptions
+		}
 	}
 }
 
