@@ -51,14 +51,19 @@ func ParseResponseHeader(r io.Reader) (*Header, error) {
 
 func ParseLengthPrefixedMessage(r io.Reader, length uint32) ([]byte, error) {
 	content := make([]byte, length)
-	n, err := r.Read(content)
-	switch {
-	case uint32(n) != length:
-		return nil, io.ErrUnexpectedEOF
-	case err == io.EOF:
-		return nil, io.EOF
-	case err != nil:
-		return nil, err
+	var read int
+	for uint32(read) < length {
+		n, err := r.Read(content[read:])
+		read += n
+		// EOF can be returned even if we read things - in that case,
+		// just continue. If we have enough data now we will return
+		// nil, and if we don't have enough data, we'll read EOF again
+		// next round and return it then.
+		if errors.Is(err, io.EOF) && n == 0 {
+			return nil, err
+		} else if err != nil {
+			return nil, err
+		}
 	}
 	return content, nil
 }
