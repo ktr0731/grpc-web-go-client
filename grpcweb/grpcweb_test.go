@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,7 +163,7 @@ func injectUnaryTransport(t *testing.T, tr transport.UnaryTransport) {
 	t.Cleanup(func() {
 		transport.NewUnary = old
 	})
-	transport.NewUnary = func(string, *transport.ConnectOptions) transport.UnaryTransport {
+	transport.NewUnary = func(url.URL, *transport.ConnectOptions) transport.UnaryTransport {
 		return tr
 	}
 }
@@ -652,7 +653,7 @@ func injectClientStreamTransport(t *testing.T, tr transport.ClientStreamTranspor
 	t.Cleanup(func() {
 		transport.NewClientStream = old
 	})
-	transport.NewClientStream = func(string, string) (transport.ClientStreamTransport, error) {
+	transport.NewClientStream = func(url.URL, string) (transport.ClientStreamTransport, error) {
 		return tr, nil
 	}
 }

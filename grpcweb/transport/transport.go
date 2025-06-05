@@ -23,9 +23,9 @@ type UnaryTransport interface {
 }
 
 type httpTransport struct {
-	host   string
-	client *http.Client
-	opts   *ConnectOptions
+	baseUri url.URL
+	client  *http.Client
+	opts    *ConnectOptions
 
 	header http.Header
 
@@ -44,9 +44,8 @@ func (t *httpTransport) Send(ctx context.Context, endpoint, contentType string, 
 		t.sent = true
 	}()
 
-	// TODO: HTTPS support.
-	scheme := "http"
-	u := url.URL{Scheme: scheme, Host: t.host, Path: endpoint}
+	u := t.baseUri
+	u.Path = joinPath(u.Path, endpoint)
 	url := u.String()
 	req, err := http.NewRequest(http.MethodPost, url, body)
 	if err != nil {
@@ -70,12 +69,12 @@ func (t *httpTransport) Close() error {
 	return nil
 }
 
-var NewUnary = func(host string, opts *ConnectOptions) UnaryTransport {
+var NewUnary = func(baseUri url.URL, opts *ConnectOptions) UnaryTransport {
 	return &httpTransport{
-		host:   host,
-		client: http.DefaultClient,
-		opts:   opts,
-		header: make(http.Header),
+		baseUri: baseUri,
+		client:  http.DefaultClient,
+		opts:    opts,
+		header:  make(http.Header),
 	}
 }
 
@@ -103,9 +102,7 @@ type ClientStreamTransport interface {
 //
 // spec: https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md
 type webSocketTransport struct {
-	host     string
-	endpoint string
-
+	uri  url.URL
 	conn *websocket.Conn
 
 	once    sync.Once
@@ -265,20 +262,33 @@ func (t *webSocketTransport) writeMessage(msg int, b []byte) error {
 	return t.conn.WriteMessage(msg, b)
 }
 
-var NewClientStream = func(host, endpoint string) (ClientStreamTransport, error) {
-	// TODO: WebSocket over TLS support.
-	u := url.URL{Scheme: "ws", Host: host, Path: endpoint}
+var NewClientStream = func(uri url.URL, endpoint string) (ClientStreamTransport, error) {
+	if uri.Scheme == "http" {
+		uri.Scheme = "ws"
+	} else if uri.Scheme == "https" {
+		uri.Scheme = "wss"
+	}
+	uri.Path = joinPath(uri.Path, endpoint)
 	h := http.Header{}
 	h.Set("Sec-WebSocket-Protocol", "grpc-websockets")
 	var conn *websocket.Conn
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), h)
+	conn, _, err := websocket.DefaultDialer.Dial(uri.String(), h)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to dial to '%s'", u.String())
+		return nil, errors.Wrapf(err, "failed to dial to '%s'", uri.String())
 	}
 
 	return &webSocketTransport{
-		host:     host,
-		endpoint: endpoint,
-		conn:     conn,
+		uri:  uri,
+		conn: conn,
 	}, nil
+}
+
+func joinPath(a, b string) string {
+	if strings.HasSuffix(a, "/") && strings.HasPrefix(b, "/") {
+		return a + b[1:]
+	} else if !strings.HasSuffix(a, "/") && !strings.HasPrefix(b, "/") {
+		return a + "/" + b
+	} else {
+		return a + b
+	}
 }
